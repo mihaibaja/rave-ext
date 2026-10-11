@@ -53,8 +53,8 @@ void print_counters_human(FILE * fd, rave_counters * counters){
             double vdep = counters->VRAW_deps+counters->VWAR_deps+counters->VWAW_deps;
             indent(fd,--level,0); fprintf(fd,"Dependencies: "); fprintf(fd,"\n");
             ++level;
-            if(TRACE_SCALAR){
-                indent(fd,  level,0); fprintf(fd,"Scalar: "); P_NUMBER(fd, "%.0f", sdep); fprintf(fd,"\n");
+            if(TRACE_SCALAR || sdep > 0){
+                indent(fd,  level,0); fprintf(fd,"Vector With Scalar: "); P_NUMBER(fd, "%.0f", sdep); fprintf(fd,"\n");
                 ++level;
                 if(RAW_DIST){
                     indent(fd,  level,0); fprintf(fd,"RAW: "); P_NUMBER(fd, "%.0f", counters->RAW_deps);fprintf(fd,"\n");
@@ -126,9 +126,7 @@ void print_counters_human(FILE * fd, rave_counters * counters){
                     indent(fd,  level,0); fprintf(fd,"strided: "); P_NUMBER(fd,"%.0f", counters->vstride_instr[s]); PERCENTAGE(fd,counters->vstride_instr[s], totvmem,'\n');
                     if (counters->vstride_instr[s] > 0){
                         double avg_stride = counters->agg_strides[s] / counters->vstride_instr[s];
-                        double stride_variance = counters->agg_strides_squared[s] / counters->vstride_instr[s] - avg_stride * avg_stride;
                         indent(fd,++level,0); fprintf(fd,"Avg. Stride (B): "); P_NUMBER(fd,"%.2f", avg_stride); fprintf(fd,"\n");
-                        indent(fd,level,1); fprintf(fd,"Std. Dev. Stride (B): "); P_NUMBER(fd,"%.2f", sqrt(fmax(0.0, stride_variance))); fprintf(fd,"\n");
                         --level;
                     }
                     indent(fd,level,0); fprintf(fd,"indexed: "); P_NUMBER(fd,"%.0f", counters->vidx_instr[s]); PERCENTAGE(fd,counters->vidx_instr[s], totvmem,'\n');
@@ -229,17 +227,16 @@ void print_counters_human(FILE * fd, rave_counters * counters){
                     if (counters->vstride_instr[s] > 0){
                         double avg_stride = counters->agg_strides[s] / counters->vstride_instr[s];
                         double stride_variance = counters->agg_strides_squared[s] / counters->vstride_instr[s] - avg_stride * avg_stride;
-                        indent(fd,++level,0); fprintf(fd,"Avg. Stride (B): "); P_NUMBER(fd,"%.2f", avg_stride); fprintf(fd,"\n");
-                        indent(fd,level,0); fprintf(fd,"Std. Dev. Stride (B): "); P_NUMBER(fd,"%.2f", sqrt(fmax(0.0, stride_variance))); fprintf(fd,"\n");
-                        --level;
-                    }
-                    if(counters->vseg_instr_stride[s] > 0) {
-                        indent(fd,++level,1); fprintf(fd,"Segmented: "); P_NUMBER(fd,"%.0f", counters->vseg_instr_stride[s]); PERCENTAGE(fd,counters->vseg_instr_stride[s], counters->vstride_instr[s],'\n');
+                        indent(fd,++level,0); fprintf(fd,"Segmented: "); P_NUMBER(fd,"%.0f", counters->vseg_instr_stride[s]); PERCENTAGE(fd,counters->vseg_instr_stride[s], counters->vstride_instr[s],'\n');
+                        indent(fd,level,0); fprintf(fd,"Avg. Stride (B): "); P_NUMBER(fd,"%.2f", avg_stride); fprintf(fd,"\n");
+                        indent(fd,level,1); fprintf(fd,"Std. Dev. Stride (B): "); P_NUMBER(fd,"%.2f", sqrt(fmax(0.0, stride_variance))); fprintf(fd,"\n");
                         --level;
                     }
                     indent(fd,level,0); fprintf(fd,"indexed: "); P_NUMBER(fd,"%.0f", counters->vidx_instr[s]); PERCENTAGE(fd,counters->vidx_instr[s], totvmem,'\n');
-                    if(counters->vseg_instr_idx[s] > 0) {
-                        indent(fd,++level,1); fprintf(fd,"Segmented: "); P_NUMBER(fd,"%.0f", counters->vseg_instr_idx[s]); PERCENTAGE(fd,counters->vseg_instr_idx[s], counters->vidx_instr[s],'\n');
+                    if(counters->vidx_instr > 0) {
+                        indent(fd,++level,0); fprintf(fd,"Segmented: "); P_NUMBER(fd,"%.0f", counters->vseg_instr_idx[s]); PERCENTAGE(fd,counters->vseg_instr_idx[s], counters->vidx_instr[s],'\n');
+                        indent(fd,  level,0); fprintf(fd,"Ordered: "); P_NUMBER(fd,"%.0f", counters->vidx_instr_ordered[s]); PERCENTAGE(fd,counters->vidx_instr_ordered[s], counters->vidx_instr[s],'\n');
+                        indent(fd,  level,1); fprintf(fd,"Unordered: "); P_NUMBER(fd,"%.0f", counters->vidx_instr_unordered[s]); PERCENTAGE(fd,counters->vidx_instr_unordered[s], counters->vidx_instr[s],'\n');
                         --level;
                     }
                     indent(fd,level,1); fprintf(fd,"whole-register: "); P_NUMBER(fd,"%.0f", counters->vspill_instr[s]); PERCENTAGE(fd,counters->vspill_instr[s], totvmem,'\n');

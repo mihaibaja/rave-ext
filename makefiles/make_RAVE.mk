@@ -18,7 +18,8 @@ profiling.o \
 rave2prv.o \
 regions.o \
 threading.o \
-scalar_blocks.o
+scalar_blocks.o \
+inst_trace.o
 
 QEMU_OBJ=\
 utils.o \

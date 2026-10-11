@@ -265,13 +265,14 @@ uint16_t instr_set_vector_type_ext(uint32_t insn_opcode, char* instr_asm, uint16
             }
 
             /** REDUCTION INSTRUCTIONS */
-            else if (funct3 == 2 && ((funct6 >= 0 && funct6 <= 7) || funct6 == 0x30 || funct6 == 0x31)) {   
+            if (funct3 == 2 && ((funct6 >= 0 && funct6 <= 7) || funct6 == 0x30 || funct6 == 0x31)) {   
                 /**OPMVV: 010 
                  * f6 == 0x30 y 0x31: vwredsumu y vwredsum
                  * others: vredsum, vredand, vredor, vredxor, vredminu, vredmin, vredmaxu, vredmax
                 */
                 type_ext &= ~MASK_EXT_SUBSUBTYPE;
                 type_ext |= TYPE_EXT_ARITH_REDUCTION;
+                type_ext |= TYPE_EXT_INT;     
             } else if (funct3 == 1 &&
                 ((funct6%2 == 1 && funct6 > 0 && funct6 < 8) || funct6 == 0x31 || funct6 == 0x33)) {   
                 /**OPFVV: 001
@@ -280,6 +281,7 @@ uint16_t instr_set_vector_type_ext(uint32_t insn_opcode, char* instr_asm, uint16
                 */
                 type_ext &= ~MASK_EXT_SUBSUBTYPE;
                 type_ext |= TYPE_EXT_ARITH_REDUCTION;
+                type_ext |= TYPE_EXT_FP;     
             } 
 
             /** SLIDE INSTRUCTIONS */

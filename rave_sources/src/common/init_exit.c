@@ -17,6 +17,7 @@
 #include "profiling.h"
 #include "write_pcf.h"
 #include "utils.h"
+#include "inst_trace.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -226,6 +227,9 @@ void rave_exit()
 	}
 	free_regions();
 	//free_event_regions(); //Legacy
+	if (INST_TRACE_ENABLED) {
+		inst_trace_exit();
+	}
 	fflush(stdout);
 }
 
@@ -270,6 +274,13 @@ void rave_init(int argc, char **argv){
 	if ( world_rank!=NULL/* && alloc_threads < 4*/ ) alloc_threads += 3; //Mpi process adds two/three threads
 	mpi_size = world_rank==NULL? 1 : atoi(world_rank);
 
+	char * RAVE_INST_TRACE = getenv("RAVE_INST_TRACE_ENABLED");
+	if (RAVE_INST_TRACE != NULL && atoi(RAVE_INST_TRACE) == 1) INST_TRACE_ENABLED = 1;
+	char * RAVE_INST_NAME = getenv("RAVE_INST_TRACE_NAME");
+	if (RAVE_INST_NAME != NULL) {
+		INST_TRACE_NAME = strdup(RAVE_INST_NAME);
+	}
+
 	expected_threads = alloc_threads;
 	cpus_state = (thread_state_t*)malloc(sizeof(thread_state_t)*alloc_threads);
 
@@ -278,6 +289,14 @@ void rave_init(int argc, char **argv){
 		else if (contains_string(argv[i], "TRACE_ADDR")) TRACE_ADDR = 1;
 		else if (contains_string(argv[i], "TRACE_INDEXES")) TRACE_INDEXES = 1;
 		else if (contains_string(argv[i], "TRACE_EXTENDED")) TRACE_EXTENDED = 1;
+		else if (contains_string(argv[i], "INST_TRACE_ENABLED")) INST_TRACE_ENABLED = 1;
+		else if (contains_string(argv[i], "INST_TRACE_NAME")){
+			size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;
+			if (INST_TRACE_NAME) free(INST_TRACE_NAME);
+			int len = strlen(&argv[i][j+1]);
+			INST_TRACE_NAME = malloc(len+1);
+			strcpy(INST_TRACE_NAME, &argv[i][j+1]);
+		}
 		else if (contains_string(argv[i], "DEBUG_INFO")) DEBUG_INFO = 1;
 		else if (contains_string(argv[i], "PRINT_PRV")) PRINT_PRV = 1;
 		else if (contains_string(argv[i], "PRINT_LOGFILE")) PRINT_LOGFILE = 1;
@@ -407,6 +426,10 @@ void rave_init(int argc, char **argv){
 			trace_row(FD_PRV, 0, 0, SCALAR_ROW, 0);
 			trace_event_value(FD_PRV,event_VLEN,RAVE_VLMAX);
 			trace_event_value(FD_PRV,event_ELEN,RAVE_ELEN);
+		}
+
+		if (INST_TRACE_ENABLED){
+			inst_trace_init();
 		}
 
 		rave_ini_regions();

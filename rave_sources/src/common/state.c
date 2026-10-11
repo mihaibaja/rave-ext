@@ -38,6 +38,9 @@ char STREAM_REPORT = 0;
 char TRACE_ADDR = 0;
 char TRACE_SCALAR = 0;
 char TRACE_EXTENDED = 0;
+char INST_TRACE_ENABLED = 0;
+char * INST_TRACE_NAME = NULL;
+FILE * FD_INST_TRACE = NULL;
 char DEBUG_INFO = 0;
 int RAW_DIST = 8;
 int WAR_DIST = 20;
@@ -136,6 +139,8 @@ void reset_thread(int cpu_index){
 	reset_counters(&(state->accum_counters));
 	memset(state->write_reg_deps, 0, sizeof(state->write_reg_deps));
 	memset(state->read_reg_deps, 0, sizeof(state->read_reg_deps));
+	memset(state->inst_trace_last_write, 0, sizeof(state->inst_trace_last_write));
+	memset(state->inst_trace_last_read, 0, sizeof(state->inst_trace_last_read));
 	
 	//Musa:
 	state -> prev_dst = 0;

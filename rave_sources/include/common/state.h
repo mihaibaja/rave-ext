@@ -33,6 +33,9 @@ extern char STREAM_REPORT;
 extern char TRACE_ADDR;
 extern char TRACE_SCALAR;
 extern char TRACE_EXTENDED;
+extern char INST_TRACE_ENABLED;
+extern char * INST_TRACE_NAME;
+extern FILE * FD_INST_TRACE;
 extern char DEBUG_INFO;
 extern int RAW_DIST;
 extern int WAR_DIST;
@@ -97,6 +100,9 @@ struct thread_state_t{
     // To check dependencies
     struct inst_compressed_t write_reg_deps[96];
     struct inst_compressed_t read_reg_deps[96];
+
+    uint64_t inst_trace_last_write[96];
+    uint64_t inst_trace_last_read[96];
 
 	void * regs;
 };

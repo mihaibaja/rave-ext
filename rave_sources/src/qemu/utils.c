@@ -90,9 +90,10 @@ int64_t get_xreg(thread_state_t * state, int reg){
 	return (int64_t)reg_val; 
 }
 char * get_vreg(thread_state_t * state, int reg, int vlB){
-
+	if (vlB <= 0) return NULL;
 	int nregs = (vlB*8 + RAVE_VLMAX - 1) / RAVE_VLMAX; //Ceiling division
-	char * values = aligned_alloc(8, vlB);
+	size_t alloc_sz = ((vlB + 7) / 8) * 8;
+	char * values = aligned_alloc(8, alloc_sz);
 	int idx = 0;
 
 	for (int nr = 0; nr<nregs; ++nr){

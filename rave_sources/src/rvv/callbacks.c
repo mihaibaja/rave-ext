@@ -13,6 +13,7 @@
 #include "utils.h"
 #include "profiling.h"
 #include "scalar_blocks.h"
+#include "inst_trace.h"
 #include <sched.h>
 
 static void record_vector_register(double * usage, short reg){
@@ -90,6 +91,17 @@ void scalar_block_exec(thread_state_t * state, scalar_block_data_t * data){
 	int n_instr = data->instr;
 
 	if (TRACE_ENABLED){
+        if (INST_TRACE_ENABLED && TRACE_SCALAR){
+            for(int i=0; i<n_instr; ++i){
+                inst_trace_emit_scalar(state,
+                                       data->PCs ? data->PCs[i] : 0,
+                                       (data->strings ? data->strings[i] : NULL),
+                                       0,
+                                       (data->dst_d ? data->dst_d[i] : -1),
+                                       (data->src1_d ? data->src1_d[i] : -1),
+                                       (data->src2_d ? data->src2_d[i] : -1));
+            }
+        }
         if(TRACE_EXTENDED){
             for(int i=0; i<n_instr; ++i){
                 // -ADDED
@@ -101,41 +113,6 @@ void scalar_block_exec(thread_state_t * state, scalar_block_data_t * data){
                 }
                 instr_c.pos = state->accum_counters.scalar_instr+state->accum_counters.vsetvl_instr+pos_aux+1;
                 instr_c.type = 0x0000; //Scalar instruction
-                if(TRACE_SCALAR){
-                    if(valid_reg_id(data->dst_d[i])) {
-                        // WAW: Write After Write (Depende de la última escritura)
-                        if(state->write_reg_deps[data->dst_d[i]].pos != 0 && 
-                           (instr_c.pos - state->write_reg_deps[data->dst_d[i]].pos <= WAW_DIST)) {
-                                state->accum_counters.WAW_deps++;
-                                if(DEBUG_INFO) fprintf(stdout, "WAW dependency detected on register %d: write at pos %li, instruction: %s, previous write at pos %li, previous instruction: %s\n", 
-                                    data->dst_d[i], instr_c.pos, instr_c.asm_string, 
-                                    state->write_reg_deps[data->dst_d[i]].pos, state->write_reg_deps[data->dst_d[i]].asm_string);
-                        }
-                        
-                        // WAR: Write After Read (Depende de la última lectura)
-                        if(state->read_reg_deps[data->dst_d[i]].pos != 0 && 
-                           (instr_c.pos - state->read_reg_deps[data->dst_d[i]].pos <= WAR_DIST)) {
-                                state->accum_counters.WAR_deps++;
-                                if(DEBUG_INFO) fprintf(stdout, "WAR dependency detected on register %d: write at pos %li, instruction: %s, previous read at pos %li, previous instruction: %s\n", 
-                                    data->dst_d[i], instr_c.pos, instr_c.asm_string, 
-                                    state->read_reg_deps[data->dst_d[i]].pos, state->read_reg_deps[data->dst_d[i]].asm_string);
-                        }
-                    }
-                    if(valid_reg_id(data->src1_d[i]) && state->write_reg_deps[data->src1_d[i]].pos != 0 && 
-                       (instr_c.pos - state->write_reg_deps[data->src1_d[i]].pos <= RAW_DIST)) {
-                            state->accum_counters.RAW_deps++;
-                            if(DEBUG_INFO) fprintf(stdout, "RAW dependency detected on register %d: read at pos %li, instruction: %s, previous write at pos %li, previous instruction: %s\n", 
-                                data->src1_d[i], instr_c.pos, instr_c.asm_string, 
-                                state->write_reg_deps[data->src1_d[i]].pos, state->write_reg_deps[data->src1_d[i]].asm_string);
-                    }
-                    if(valid_reg_id(data->src2_d[i]) && state->write_reg_deps[data->src2_d[i]].pos != 0 && 
-                       (instr_c.pos - state->write_reg_deps[data->src2_d[i]].pos <= RAW_DIST)){
-                            state->accum_counters.RAW_deps++;
-                            if(DEBUG_INFO) fprintf(stdout, "RAW dependency detected on register %d: read at pos %li, instruction: %s, previous write at pos %li, previous instruction: %s\n", 
-                                data->src2_d[i], instr_c.pos, instr_c.asm_string, 
-                                state->write_reg_deps[data->src2_d[i]].pos, state->write_reg_deps[data->src2_d[i]].asm_string);
-                    }
-                }
 
 				if(valid_reg_id(data->dst_d[i])) state->write_reg_deps[data->dst_d[i]] = instr_c;
 				if(valid_reg_id(data->src1_d[i])) state->read_reg_deps[data->src1_d[i]] = instr_c;
@@ -296,7 +273,7 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 	}
 
 	int row = SCALAR_ROW;
-	uint64_t vl=0, vtype, sew=3, lmul=1, rvl=0;
+	uint64_t vl=0, vtype = 0, sew=3, lmul=1, rvl=0;
 	//double lmul_value;
 	uint64_t addr = 0;
 	int stride = 0;
@@ -319,16 +296,24 @@ void insn_exec(thread_state_t * state, instr_data * instr){
         if(valid_reg_id(instr->dst_d)){
             if(state->write_reg_deps[instr->dst_d].pos != 0
                 && (instr_c.pos-state->write_reg_deps[instr->dst_d].pos <= WAW_DIST)) {
-                    state->accum_counters.VWAW_deps++;
-                    state->accum_counters.avg_VWAW_deps += instr_c.pos-state->write_reg_deps[instr->dst_d].pos;
+                    if (instr->dst_d >= RAVE_INI_REG_V) { // If the destination register is a vector register, count it as a VWAW dependency
+                        state->accum_counters.VWAW_deps++;
+                        state->accum_counters.avg_VWAW_deps += instr_c.pos-state->write_reg_deps[instr->dst_d].pos;
+                    } else {                              // Otherwise, count it as a WAW dependency(dependencie with scalar instructions)
+                        state->accum_counters.WAW_deps++;
+                    }
                     if(DEBUG_INFO) fprintf(stdout, "WAW dependency detected on register %d: write at pos %li, instruction: %s, previous write at pos %li, previous instruction: %s\n", 
                         instr->dst_d, instr_c.pos, instr->asm_string, 
                         state->write_reg_deps[instr->dst_d].pos, state->write_reg_deps[instr->dst_d].asm_string);            
             }
             if(state->write_reg_deps[instr->dst_d].pos != 0
                 && (instr_c.pos-state->read_reg_deps[instr->dst_d].pos <= WAR_DIST)) {
-                    state->accum_counters.VWAR_deps++;
-                state->accum_counters.avg_VWAR_deps += instr_c.pos-state->read_reg_deps[instr->dst_d].pos;
+                    if (instr->dst_d >= RAVE_INI_REG_V) {
+                        state->accum_counters.VWAR_deps++;
+                        state->accum_counters.avg_VWAR_deps += instr_c.pos-state->read_reg_deps[instr->dst_d].pos;
+                    } else {
+                        state->accum_counters.WAR_deps++;
+                    }
                     if(DEBUG_INFO) fprintf(stdout, "WAR dependency detected on register %d: write at pos %li, instruction: %s, previous read at pos %li, previous instruction: %s\n", 
                         instr->dst_d, instr_c.pos, instr->asm_string, 
                         state->read_reg_deps[instr->dst_d].pos, state->read_reg_deps[instr->dst_d].asm_string);
@@ -336,24 +321,36 @@ void insn_exec(thread_state_t * state, instr_data * instr){
         }
         if(valid_reg_id(instr->src1_d) && (instr->src1_d > 0 && state->write_reg_deps[instr->src1_d].pos != 0)
             && (instr_c.pos-state->write_reg_deps[instr->src1_d].pos <= RAW_DIST)) {
-                state->accum_counters.VRAW_deps++;
-                state->accum_counters.avg_VRAW_deps += instr_c.pos-state->write_reg_deps[instr->src1_d].pos;
+                if (instr->src1_d >= RAVE_INI_REG_V) {
+                    state->accum_counters.VRAW_deps++;
+                    state->accum_counters.avg_VRAW_deps += instr_c.pos-state->write_reg_deps[instr->src1_d].pos;
+                } else {
+                    state->accum_counters.RAW_deps++;
+                }
                 if(DEBUG_INFO) fprintf(stdout, "RAW dependency detected on register %d: read at pos %li, instruction: %s, previous write at pos %li, previous instruction: %s\n", 
                     instr->src1_d, instr_c.pos, instr->asm_string, 
                     state->write_reg_deps[instr->src1_d].pos, state->write_reg_deps[instr->src1_d].asm_string);
         }
         if(valid_reg_id(instr->src2_d) &&(instr->src2_d > 0 && state->write_reg_deps[instr->src2_d].pos != 0)
             && (instr_c.pos-state->write_reg_deps[instr->src2_d].pos <= RAW_DIST)){
-                state->accum_counters.VRAW_deps++;
-                state->accum_counters.avg_VRAW_deps += instr_c.pos-state->write_reg_deps[instr->src2_d].pos;
+                if (instr->src2_d >= RAVE_INI_REG_V) {
+                    state->accum_counters.VRAW_deps++;
+                    state->accum_counters.avg_VRAW_deps += instr_c.pos-state->write_reg_deps[instr->src2_d].pos;
+                } else {
+                    state->accum_counters.RAW_deps++;
+                }
                 if(DEBUG_INFO) fprintf(stdout, "RAW dependency detected on register %d: read at pos %li, instruction: %s, previous write at pos %li, previous instruction: %s\n", 
                     instr->src2_d, instr_c.pos, instr->asm_string, 
                     state->write_reg_deps[instr->src2_d].pos, state->write_reg_deps[instr->src2_d].asm_string);
         }
         if(valid_reg_id(instr->src3_d) &&(instr->src3_d > 0 && state->write_reg_deps[instr->src3_d].pos != 0)
             && (instr_c.pos-state->write_reg_deps[instr->src3_d].pos <= RAW_DIST)){
-                state->accum_counters.VRAW_deps++;
-                state->accum_counters.avg_VRAW_deps += instr_c.pos-state->write_reg_deps[instr->src3_d].pos;
+                if (instr->src3_d >= RAVE_INI_REG_V) {
+                    state->accum_counters.VRAW_deps++;
+                    state->accum_counters.avg_VRAW_deps += instr_c.pos-state->write_reg_deps[instr->src3_d].pos;
+                } else {
+                    state->accum_counters.RAW_deps++;
+                }
                 if(DEBUG_INFO) fprintf(stdout, "RAW dependency detected on register %d: read at pos %li, instruction: %s, previous write at pos %li, previous instruction: %s\n", 
                     instr->src3_d, instr_c.pos, instr->asm_string, 
                     state->write_reg_deps[instr->src3_d].pos, state->write_reg_deps[instr->src3_d].asm_string);
@@ -382,7 +379,7 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 
 #endif
 		if (is_subtype(instr->type, T_MEMORY)){
-			if (TRACE_ADDR){
+			if (TRACE_ADDR || INST_TRACE_ENABLED){
 				int src1 = (instr->instr32>>15)&0x1F;
 				addr = get_xreg(state,src1);
 			}
@@ -396,7 +393,7 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 			sew = width;
 #endif
 
-			if(TRACE_INDEXES && is_subsubtype(instr->type, T_INDEX)){
+			if((TRACE_INDEXES || INST_TRACE_ENABLED) && is_subsubtype(instr->type, T_INDEX)){
 				int src2 = (instr->instr32>>20)&0x1F;
 				char * contents = get_vreg(state,src2,vl*(2<<(sew)));
 				if (sew==0) indexes_8 = (int8_t*)contents;
@@ -444,6 +441,19 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 			release_lock(write_lock);
 		}
 
+		//  Instruction Trace  //
+		if (INST_TRACE_ENABLED){
+			if (is_type(instr->type, T_VSETVL)){
+				inst_trace_emit_vsetvl(state, instr, rvl, vl, vtype);
+			}else{
+				void * idx_ptr = indexes_8 ? (void*)indexes_8 :
+				                 indexes_16 ? (void*)indexes_16 :
+				                 indexes_32 ? (void*)indexes_32 : (void*)indexes_64;
+				inst_trace_emit_vector(state, instr, vl, sew, lmul, vtype, addr, stride,
+				                       idx_ptr, is_subsubtype(instr->type, T_INDEX));
+			}
+		}
+
 		//  PRV  //
 		if (PRINT_PRV){
 			int cpu_index = state->cpu_index;
@@ -483,18 +493,22 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 						trace_event_value(FD_PRV, event_indexes, 1);
 						for(uint64_t i=0; i<vl; ++i) trace_event_value(FD_PRV, event_indexes+1+i, (int)indexes_8[i]);
 						free(indexes_8);
+						indexes_8 = NULL;
 					}else if (indexes_16 != NULL){
 						trace_event_value(FD_PRV, event_indexes, 1);
 						for(uint64_t i=0; i<vl; ++i)  trace_event_value(FD_PRV, event_indexes+1+i, (int)indexes_16[i]);
 						free(indexes_16);
+						indexes_16 = NULL;
 					}else if (indexes_32 != NULL){
 						trace_event_value(FD_PRV, event_indexes, 1);
 						for(uint64_t i=0; i<vl; ++i)  trace_event_value(FD_PRV, event_indexes+1+i, (int)indexes_32[i]);
 						free(indexes_32);
+						indexes_32 = NULL;
 					}else if (indexes_64 != NULL){
 						trace_event_value(FD_PRV, event_indexes, 1);
 						for(uint64_t i=0; i<vl; ++i)  trace_event_value(FD_PRV, event_indexes+1+i, indexes_64[i]);
 						free(indexes_64);
+						indexes_64 = NULL;
 					}
 				}
 				if (MUSA){
@@ -528,6 +542,11 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 			}
 		}
 	}
+
+	if (indexes_8) { free(indexes_8); indexes_8 = NULL; }
+	if (indexes_16) { free(indexes_16); indexes_16 = NULL; }
+	if (indexes_32) { free(indexes_32); indexes_32 = NULL; }
+	if (indexes_64) { free(indexes_64); indexes_64 = NULL; }
 
 	// Counters //
 	loop_profile->loop_instr++; 
@@ -589,10 +608,11 @@ void insn_exec(thread_state_t * state, instr_data * instr){
                     if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_COMP_FUSED)){
                         ++state->accum_counters.vwfused_instr[sew];
                     } else if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_REDUCTION)){
-                        if(is_type_ext(instr->type_ext, TYPE_EXT_FP, TYPE_EXT_INT))
+                        if(is_type_ext(instr->type_ext, TYPE_EXT_FP, TYPE_EXT_INT)){
                             ++state->accum_counters.vint_reductions[sew];
-                        else
+                        } else {
                             ++state->accum_counters.vfp_reductions[sew];
+                        }
                     }
                 } else if(is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_ARITH_NARROWING)) {
                     ++state->accum_counters.vnarrowing_instr[sew];
