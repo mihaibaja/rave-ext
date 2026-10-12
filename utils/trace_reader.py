@@ -156,6 +156,11 @@ class InstructionRecord:
     vma: int
     masked: bool
     deps: List[OperandDependency]
+    # `vstart` y `active_elements` son obligatorios en schema/trace_schema_v1.json y
+    # estan presentes en los fixtures, pero el emisor actual (inst_trace.c) todavia
+    # no los escribe; se aceptan como opcionales para no romper esas trazas.
+    vstart: int = 0
+    active_elements: int = 0
     aux_records: List[AuxRecord] = field(default_factory=list)
 
     @classmethod
@@ -197,6 +202,12 @@ class InstructionRecord:
             raise TraceFormatError(f"sew must be int, got {type(data['sew']).__name__}")
         if not isinstance(data["masked"], bool):
             raise TraceFormatError(f"masked must be bool, got {type(data['masked']).__name__}")
+        for optional_int_field in ("vstart", "active_elements"):
+            if optional_int_field in data and not isinstance(data[optional_int_field], int):
+                raise TraceFormatError(
+                    f"{optional_int_field} must be int, "
+                    f"got {type(data[optional_int_field]).__name__}"
+                )
 
         deps_list = [
             OperandDependency.from_dict(d, seqno) for d in data.get("deps", [])
@@ -219,6 +230,8 @@ class InstructionRecord:
             vma=int(data["vma"]),
             masked=data["masked"],
             deps=deps_list,
+            vstart=data.get("vstart", 0),
+            active_elements=data.get("active_elements", 0),
         )
 
     def is_vector(self) -> bool:
