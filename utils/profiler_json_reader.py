@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Lector y validador de referencia del JSON del profiler de RAVE.
 
-Implementa el contrato descrito en ``PROFILER_JSON_API.md`` y lo valida contra
+Implementa el contrato descrito en ``docs/PROFILER_JSON_API.md`` y lo valida contra
 ``schema/profiler_json_schema_v1.json`` con un validador de JSON Schema reducido
 (solo biblioteca estandar, al estilo de ``utils/trace_reader.py``).
 
@@ -34,7 +34,7 @@ DEFAULT_SCHEMA = REPO_ROOT / "schema" / "profiler_json_schema_v1.json"
 TOLERANCE = 0.5
 
 # Campos que solo se calculan con traza extendida (RAVE_TRACE_EXTENDED=1).
-# Fuente: PROFILER_JSON_API.md, seccion 1.4.
+# Fuente: docs/PROFILER_JSON_API.md, seccion 1.4.
 EXTENDED_ONLY_FIELDS = (
     "arith.narrowing",
     "arith.widening",
@@ -231,7 +231,7 @@ def _get(node, dotted):
 
 
 def check_invariants(doc):
-    """Comprueba las descomposiciones de PROFILER_JSON_API.md.
+    """Comprueba las descomposiciones de ``docs/PROFILER_JSON_API.md``.
 
     Devuelve ``(errores, avisos)``: los errores son incoherencias del fichero,
     los avisos son cosas esperables pero que conviene saber.

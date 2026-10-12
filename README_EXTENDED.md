@@ -144,8 +144,9 @@ todas las regiones. Es un único documento JSON, con un objeto por región.
 | `RAVE_ACCUM_REGIONS` | si está activo, cada región lleva la **media** de sus ejecuciones en vez del **delta** de la última |
 
 El **esquema del documento** (campo a campo, con las reglas de parseo y los solapes
-entre categorías) está en **`PROFILER_JSON_API.md`**, que es el contrato de entrada
-del visor `profiler/`. Hay además un **esquema legible por máquina**
+entre categorías) está en **`docs/PROFILER_JSON_API.md`**, que es el contrato de
+entrada del visor (`../profiler/`, un proyecto aparte que no está en este
+repositorio). Hay además un **esquema legible por máquina**
 (`schema/profiler_json_schema_v1.json`) y un validador de referencia que comprueba
 la forma y las invariantes del contrato (descomposiciones de contadores, orden de
 los bloques SEW, campos extendidos a cero sin traza extendida):
@@ -221,7 +222,7 @@ tolerancia relativa (~1e-5) o ignóralos.
 * **`other.instr` puede ser negativo** y hay **valores duplicados** (`mask` y
   `reduction` se cuentan dentro de `arith` y vuelven a aparecer al mismo nivel). No
   agregues el eje "función" junto con el eje "forma". Detalle en
-  `PROFILER_JSON_API.md` §1.5.
+  `docs/PROFILER_JSON_API.md` §1.5.
 * `avg_vl_elems` es la media de VL en **elementos** sobre todas las instrucciones
   vectoriales (mezcla SEW y LMUL); `avg_vl_bits` es la media en **bits**, así que
   pondera distinto cuando hay varios SEW. Para "cuánto se llena el datapath" usa
@@ -276,8 +277,9 @@ print(df.to_string(index=False))
 
 ### 7.3 Visor gráfico
 
-`profiler/` abre estos JSON desde dentro del programa (pestañas por región, leyenda
-en texto y diagramas de tarta):
+El visor `../profiler/` (proyecto aparte, fuera de este repositorio) abre estos JSON
+desde dentro del programa (pestañas por región, leyenda en texto y diagramas de
+tarta). Los ejemplos se ejecutan desde el directorio que contiene a `rave-ext/`:
 
 ```bash
 cd profiler && ./build/profiler            # abre a pantalla completa y eliges el .json con O
