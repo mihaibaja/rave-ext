@@ -194,7 +194,7 @@ void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 
 	size_t n = qemu_plugin_tb_n_insns(tb);
 
-	if (!PRINT_PRV && !PRINT_LOGFILE && !PRINT_REPORT && !PRINT_CSV && !PRINT_PROFILE && !INST_TRACE_ENABLED){
+	if (!PRINT_PRV && !PRINT_LOGFILE && !PRINT_REPORT && !PRINT_CSV && !PRINT_PROFILE && !PRINT_JSON && !INST_TRACE_ENABLED){
 		return;
 	}
 

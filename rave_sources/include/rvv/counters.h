@@ -105,3 +105,4 @@ typedef struct rave_counters rave_counters;
 void print_counters_human(FILE * fd, rave_counters * counters);
 void print_csv_header(FILE * fd);
 void print_counters_csv(FILE * fd, rave_counters * counters);
+void print_counters_json(FILE * fd, rave_counters * counters);

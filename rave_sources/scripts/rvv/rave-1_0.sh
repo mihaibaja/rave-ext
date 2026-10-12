@@ -52,8 +52,38 @@ Control report / profile / csv generation:
 
  - RAVE_PRINT_CSV: If set to "1", the tracer will print a CSV with the hardware counter summary for each executed code region. (default: 0).
  - RAVE_CSV_NAME: Sets the name of the generated csv trace (default: rave_summary.csv). Additionally, automatically sets RAVE_CSV to 1.
+
+ - RAVE_PRINT_JSON: Enables the JSON counters report (also available as: rave --json <file>). (default: 0).
+ - RAVE_JSON_NAME: Sets the name of the generated JSON report (default: <binary>_rave.json). Additionally, automatically sets RAVE_PRINT_JSON to 1.
 "
 	exit -1
+fi
+
+# --- Salida JSON (opcional) ------------------------------------------------
+#   rave --json <fichero> <binario> [args...]
+#   rave --json=<fichero> <binario> [args...]
+#   rave --rave-json <fichero> <binario> [args...]
+# El wrapper consume estos flags, por lo que NO se pasan al benchmark.
+if [ $# -gt 0 ]; then
+	rave_passthrough=()
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--json)
+				if [ $# -lt 2 ]; then echo "ERROR: --json necesita un fichero de salida" >&2; exit 1; fi
+				RAVE_PRINT_JSON=1; RAVE_JSON_NAME="$2"; shift 2 ;;
+			--json=*)      RAVE_PRINT_JSON=1; RAVE_JSON_NAME="${1#*=}"; shift ;;
+			--rave-json)
+				if [ $# -lt 2 ]; then echo "ERROR: --rave-json necesita un fichero de salida" >&2; exit 1; fi
+				RAVE_PRINT_JSON=1; RAVE_JSON_NAME="$2"; shift 2 ;;
+			--rave-json=*) RAVE_PRINT_JSON=1; RAVE_JSON_NAME="${1#*=}"; shift ;;
+			*)             rave_passthrough+=("$1"); shift ;;
+		esac
+	done
+	set -- "${rave_passthrough[@]}"
+fi
+if [ $# -lt 1 ]; then
+	echo "Usage: $0 [--json <fichero>] path/to/your/binary [arguments]" >&2
+	exit 1
 fi
 
 #Legacy support... To be drop at some point.
@@ -155,6 +185,16 @@ if [ "$RAVE_PRINT_CSV" == "1" ] || [ "$RAVE_CSV_NAME" != "" ]; then #OPT-in
 		fi
 	fi
 	args=$args",PRINT_CSV=on,CSV_NAME=$RAVE_CSV_NAME"
+fi
+if [ "$RAVE_PRINT_JSON" == "1" ] || [ "$RAVE_JSON_NAME" != "" ]; then #OPT-in
+	if [ "$RAVE_JSON_NAME" == "" ]; then
+		if [ "$BIN_NAME" != "" ]; then
+			RAVE_JSON_NAME=`basename ${BIN_NAME}`_rave.json
+		else
+			RAVE_JSON_NAME=rave_summary.json
+		fi
+	fi
+	args=$args",PRINT_JSON=on,JSON_NAME=$RAVE_JSON_NAME"
 fi
 if [ "$RAVE_COMPRESS_REPORT" == "1" ]; then
 	args=$args",COMPRESS_REPORT=on"

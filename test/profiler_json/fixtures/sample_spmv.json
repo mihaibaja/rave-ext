@@ -1,0 +1,393 @@
+{
+  "generator": "RAVE",
+  "binary": "bin/spmv_vector.exe",
+  "vlen_bits": 16384,
+  "trace_extended": true,
+  "accumulate_regions": false,
+  "region_count": 1,
+  "regions": [
+    {
+      "id": 0,
+      "name": "GLOBAL_REGION",
+      "nesting": 0,
+      "rank": 0,
+      "thread": 0,
+      "executions": 1,
+      "parent": null,
+      "counters": {
+        "moved_bytes": {
+          "total": 957019672,
+          "scalar": 953263480,
+          "vector": 3756192
+        },
+        "flops": {
+          "total": 1136178,
+          "scalar": 510146,
+          "vector": 626032
+        },
+        "global_stats": {
+          "avg_vl_elems": 21.333896,
+          "avg_vl_bits": 1365.369320,
+          "avg_lmul": 1,
+          "avg_occupancy": 0.083336,
+          "vlen_bits": 16384,
+          "avg_vlmax_elems": 256,
+          "tu_effective": 0,
+          "ta_effective": 58689,
+          "unique_vector_registers": 4
+        },
+        "dependencies": {
+          "scalar": {
+            "total": 0,
+            "raw": 0,
+            "waw": 0,
+            "war": 0
+          },
+          "vector": {
+            "total": 146719,
+            "raw": {
+              "count": 80696,
+              "avg_dist": 2
+            },
+            "waw": {
+              "count": 29344,
+              "avg_dist": 2.750000
+            },
+            "war": {
+              "count": 36679,
+              "avg_dist": 8.399438
+            }
+          }
+        },
+        "instructions": {
+          "total": 490848950,
+          "scalar": 490768252,
+          "vsetvl": 22009,
+          "vector": 58689,
+          "sew": [
+            {
+              "sew": 8,
+              "instr": 0,
+              "elems": 0,
+              "avg_vl": 0,
+              "arith": {
+                "instr": 0,
+                "elems": 0,
+                "avg_vl": 0,
+                "fp": 0,
+                "int": 0,
+                "narrowing": 0,
+                "widening": 0,
+                "widening_reductions": {
+                  "total": 0,
+                  "fp": 0,
+                  "int": 0
+                },
+                "widening_fused": 0,
+                "normal": 0,
+                "permutations": {
+                  "total": 0,
+                  "moves": {
+                    "total": 0,
+                    "read_from_scalar": 0,
+                    "write_to_scalar": 0,
+                    "whole_register": 0,
+                    "others": 0
+                  },
+                  "slides": 0,
+                  "gather": 0,
+                  "compress": 0
+                },
+                "mask": 0,
+                "reductions": {
+                  "total": 0,
+                  "fp": 0,
+                  "int": 0
+                },
+                "computation": {
+                  "total": 0,
+                  "fused": 0
+                },
+                "scalar_deps": {
+                  "total": 0,
+                  "read_from_scalar": 0,
+                  "write_to_scalar": 0
+                }
+              },
+              "memory": {
+                "instr": 0,
+                "elems": 0,
+                "avg_vl": 0,
+                "unit": 0,
+                "segmented_unit": 0,
+                "strided": 0,
+                "avg_stride_b": 0,
+                "stddev_stride_b": 0,
+                "segmented_strided": 0,
+                "indexed": 0,
+                "segmented_indexed": 0,
+                "whole_register": 0
+              },
+              "reduction": {
+                "instr": 0,
+                "elems": 0,
+                "fp": 0,
+                "int": 0
+              },
+              "mask": {
+                "instr": 0,
+                "elems": 0,
+                "avg_vl": 0
+              },
+              "other": {
+                "instr": 0,
+                "elems": 0,
+                "avg_vl": 0
+              }
+            },
+            {
+              "sew": 16,
+              "instr": 0,
+              "elems": 0,
+              "avg_vl": 0,
+              "arith": {
+                "instr": 0,
+                "elems": 0,
+                "avg_vl": 0,
+                "fp": 0,
+                "int": 0,
+                "narrowing": 0,
+                "widening": 0,
+                "widening_reductions": {
+                  "total": 0,
+                  "fp": 0,
+                  "int": 0
+                },
+                "widening_fused": 0,
+                "normal": 0,
+                "permutations": {
+                  "total": 0,
+                  "moves": {
+                    "total": 0,
+                    "read_from_scalar": 0,
+                    "write_to_scalar": 0,
+                    "whole_register": 0,
+                    "others": 0
+                  },
+                  "slides": 0,
+                  "gather": 0,
+                  "compress": 0
+                },
+                "mask": 0,
+                "reductions": {
+                  "total": 0,
+                  "fp": 0,
+                  "int": 0
+                },
+                "computation": {
+                  "total": 0,
+                  "fused": 0
+                },
+                "scalar_deps": {
+                  "total": 0,
+                  "read_from_scalar": 0,
+                  "write_to_scalar": 0
+                }
+              },
+              "memory": {
+                "instr": 0,
+                "elems": 0,
+                "avg_vl": 0,
+                "unit": 0,
+                "segmented_unit": 0,
+                "strided": 0,
+                "avg_stride_b": 0,
+                "stddev_stride_b": 0,
+                "segmented_strided": 0,
+                "indexed": 0,
+                "segmented_indexed": 0,
+                "whole_register": 0
+              },
+              "reduction": {
+                "instr": 0,
+                "elems": 0,
+                "fp": 0,
+                "int": 0
+              },
+              "mask": {
+                "instr": 0,
+                "elems": 0,
+                "avg_vl": 0
+              },
+              "other": {
+                "instr": 0,
+                "elems": 0,
+                "avg_vl": 0
+              }
+            },
+            {
+              "sew": 32,
+              "instr": 0,
+              "elems": 0,
+              "avg_vl": 0,
+              "arith": {
+                "instr": 0,
+                "elems": 0,
+                "avg_vl": 0,
+                "fp": 0,
+                "int": 0,
+                "narrowing": 0,
+                "widening": 0,
+                "widening_reductions": {
+                  "total": 0,
+                  "fp": 0,
+                  "int": 0
+                },
+                "widening_fused": 0,
+                "normal": 0,
+                "permutations": {
+                  "total": 0,
+                  "moves": {
+                    "total": 0,
+                    "read_from_scalar": 0,
+                    "write_to_scalar": 0,
+                    "whole_register": 0,
+                    "others": 0
+                  },
+                  "slides": 0,
+                  "gather": 0,
+                  "compress": 0
+                },
+                "mask": 0,
+                "reductions": {
+                  "total": 0,
+                  "fp": 0,
+                  "int": 0
+                },
+                "computation": {
+                  "total": 0,
+                  "fused": 0
+                },
+                "scalar_deps": {
+                  "total": 0,
+                  "read_from_scalar": 0,
+                  "write_to_scalar": 0
+                }
+              },
+              "memory": {
+                "instr": 0,
+                "elems": 0,
+                "avg_vl": 0,
+                "unit": 0,
+                "segmented_unit": 0,
+                "strided": 0,
+                "avg_stride_b": 0,
+                "stddev_stride_b": 0,
+                "segmented_strided": 0,
+                "indexed": 0,
+                "segmented_indexed": 0,
+                "whole_register": 0
+              },
+              "reduction": {
+                "instr": 0,
+                "elems": 0,
+                "fp": 0,
+                "int": 0
+              },
+              "mask": {
+                "instr": 0,
+                "elems": 0,
+                "avg_vl": 0
+              },
+              "other": {
+                "instr": 0,
+                "elems": 0,
+                "avg_vl": 0
+              }
+            },
+            {
+              "sew": 64,
+              "instr": 58689,
+              "elems": 1252065,
+              "avg_vl": 21.333896,
+              "arith": {
+                "instr": 36681,
+                "elems": 782541,
+                "avg_vl": 21.333688,
+                "fp": 22008,
+                "int": 14673,
+                "narrowing": 0,
+                "widening": 0,
+                "widening_reductions": {
+                  "total": 0,
+                  "fp": 0,
+                  "int": 0
+                },
+                "widening_fused": 0,
+                "normal": 36681,
+                "permutations": {
+                  "total": 14673,
+                  "moves": {
+                    "total": 14673,
+                    "read_from_scalar": 1,
+                    "write_to_scalar": 7336,
+                    "whole_register": 0,
+                    "others": 7336
+                  },
+                  "slides": 0,
+                  "gather": 0,
+                  "compress": 0
+                },
+                "mask": 0,
+                "reductions": {
+                  "total": 7336,
+                  "fp": 7336,
+                  "int": 0
+                },
+                "computation": {
+                  "total": 14672,
+                  "fused": 7336
+                },
+                "scalar_deps": {
+                  "total": 0,
+                  "read_from_scalar": 0,
+                  "write_to_scalar": 0
+                }
+              },
+              "memory": {
+                "instr": 22008,
+                "elems": 469524,
+                "avg_vl": 21.334242,
+                "unit": 14672,
+                "segmented_unit": 0,
+                "strided": 0,
+                "avg_stride_b": 0,
+                "stddev_stride_b": 0,
+                "segmented_strided": 0,
+                "indexed": 7336,
+                "segmented_indexed": 0,
+                "whole_register": 0
+              },
+              "reduction": {
+                "instr": 0,
+                "elems": 0,
+                "fp": 0,
+                "int": 0
+              },
+              "mask": {
+                "instr": 0,
+                "elems": 0,
+                "avg_vl": 0
+              },
+              "other": {
+                "instr": 0,
+                "elems": 0,
+                "avg_vl": 0
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

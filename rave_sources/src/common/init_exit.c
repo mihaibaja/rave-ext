@@ -56,6 +56,9 @@ void rave_exit()
 		print_region_csv(FD_CSV, ACCUM_REGIONS);
 		//print_events_csv(FD_CSV);
 	}
+	if (PRINT_JSON){
+		print_region_json(FD_JSON, ACCUM_REGIONS);
+	}
 
 	if (PRINT_PROFILE){
 		init_dwfl(BINARY_NAME);
@@ -80,6 +83,7 @@ void rave_exit()
 	}
 
 	if (FD_CSV!=NULL) fclose(FD_CSV);
+	if (FD_JSON!=NULL && FD_JSON!=stdout) fclose(FD_JSON);
 	if (FD_REPORT!=NULL) fclose(FD_REPORT);
 	if (FD_PROFILE!=NULL) fclose(FD_PROFILE);
 	if (FD_CALLTRACE!=NULL) fclose (FD_CALLTRACE);
@@ -303,6 +307,7 @@ void rave_init(int argc, char **argv){
 		else if (contains_string(argv[i], "PRINT_REPORT")) PRINT_REPORT = 1;
 		else if (contains_string(argv[i], "STREAM_REPORT")) STREAM_REPORT = 1;
 		else if (contains_string(argv[i], "PRINT_CSV")) PRINT_CSV = 1;
+		else if (contains_string(argv[i], "PRINT_JSON")) PRINT_JSON = 1;
 		else if (contains_string(argv[i], "PRINT_PROFILE")) PRINT_PROFILE = 1;
 		else if (contains_string(argv[i], "PRINT_CALLTRACE")) PRINT_CALLTRACE = 1;
 		else if (contains_string(argv[i], "ACCUM_REGIONS")) ACCUM_REGIONS = 1;
@@ -381,6 +386,10 @@ void rave_init(int argc, char **argv){
 				size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;
 				FD_CALLTRACE = fopen(&argv[i][j+1], "w");
 			}
+			else if (contains_string(argv[i], "JSON_NAME")){
+				size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;
+				FD_JSON = fopen(&argv[i][j+1], "w");
+			}
 			else if (contains_string(argv[i], "REGION_EVENT")){
 				size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;
 				int event = atoi(&argv[i][j+1]);
@@ -416,6 +425,8 @@ void rave_init(int argc, char **argv){
 				}
 			}
 		}
+		if (PRINT_CSV && FD_CSV==NULL) FD_CSV = stdout; 
+		if (PRINT_JSON && FD_JSON==NULL) FD_JSON = stdout; 
 		if (PRINT_REPORT && FD_REPORT==NULL) FD_REPORT = stdout; 
 		if (PRINT_PROFILE && FD_PROFILE==NULL) FD_PROFILE = stdout; 
 		if (PRINT_CALLTRACE && FD_CALLTRACE==NULL) FD_CALLTRACE = stdout; 

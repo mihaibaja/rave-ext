@@ -294,3 +294,197 @@ void print_counters_csv(FILE * fd, rave_counters * counters){
 	}
 	//fprintf(fd,"\n");
 }
+
+/* -------------------------------------------------------------------------- */
+/* JSON report                                                                 */
+/* -------------------------------------------------------------------------- */
+
+static double safe_div(double num, double den){
+	return den > 0 ? num/den : 0.0;
+}
+
+static void print_sew_json(FILE * fd, rave_counters * c, int s){
+	double instr       = c->vector_instr[s];
+	double elems       = c->velem[s];
+	double arith       = c->vfp_instr[s] + c->vint_instr[s];
+	double mem         = c->vunit_instr[s] + c->vstride_instr[s] + c->vidx_instr[s] + c->vspill_instr[s];
+	double red         = c->vfp_reductions[s] + c->vint_reductions[s];
+	double arith_norm  = arith - c->vwidening_instr[s] - c->vnarrowing_instr[s];
+	double perm        = c->vmove_instr[s] + c->vslide_instr[s] + c->vgath_instr[s] + c->vcmprss_instr[s];
+	double red_n       = c->vfp_reductions_n[s] + c->vint_reductions_n[s];
+	double scal_deps   = c->inst_s_v[s] + c->inst_v_s[s];
+	double moves_other = c->vmove_instr[s] - (c->m_inst_s_v[s] + c->m_inst_v_s[s] - c->vmove_wh_instr[s]);
+	double other       = instr - mem - arith - red - c->vmask_instr[s];
+	double elem_other  = elems - c->velem_arith[s] - c->velem_reductions[s] - c->velem_mem[s] - c->velem_mask[s];
+	double avg_stride  = safe_div(c->agg_strides[s], c->vstride_instr[s]);
+	double stride_var  = c->vstride_instr[s] > 0 ? (c->agg_strides_squared[s]/c->vstride_instr[s] - avg_stride*avg_stride) : 0.0;
+	int f = 1, g;
+
+	if (stride_var < 0) stride_var = 0;
+
+	fputc('{', fd);
+	json_push();
+	json_int(fd, &f, "sew", 1 << (s+3));
+	json_int(fd, &f, "instr", instr);
+	json_int(fd, &f, "elems", elems);
+	json_num(fd, &f, "avg_vl", safe_div(elems, instr));
+
+	json_obj_open(fd, &f, "arith");
+	g = 1;
+	json_int(fd, &g, "instr", arith);
+	json_int(fd, &g, "elems", c->velem_arith[s]);
+	json_num(fd, &g, "avg_vl", safe_div(c->velem_arith[s], arith));
+	json_int(fd, &g, "fp", c->vfp_instr[s]);
+	json_int(fd, &g, "int", c->vint_instr[s]);
+	json_int(fd, &g, "narrowing", c->vnarrowing_instr[s]);
+	json_int(fd, &g, "widening", c->vwidening_instr[s]);
+	json_obj_open(fd, &g, "widening_reductions");
+		{ int h = 1; json_int(fd,&h,"total",red); json_int(fd,&h,"fp",c->vfp_reductions[s]); json_int(fd,&h,"int",c->vint_reductions[s]); }
+	json_obj_close(fd);
+	json_int(fd, &g, "widening_fused", c->vwfused_instr[s]);
+	json_int(fd, &g, "normal", arith_norm);
+	json_obj_open(fd, &g, "permutations");
+		{
+			int h = 1;
+			json_int(fd, &h, "total", perm);
+			json_obj_open(fd, &h, "moves");
+				{ int k = 1;
+				  json_int(fd,&k,"total",c->vmove_instr[s]);
+				  json_int(fd,&k,"read_from_scalar",c->m_inst_s_v[s]);
+				  json_int(fd,&k,"write_to_scalar",c->m_inst_v_s[s]);
+				  json_int(fd,&k,"whole_register",c->vmove_wh_instr[s]);
+				  json_int(fd,&k,"others",moves_other);
+				}
+			json_obj_close(fd);
+			json_int(fd, &h, "slides", c->vslide_instr[s]);
+			json_int(fd, &h, "gather", c->vgath_instr[s]);
+			json_int(fd, &h, "compress", c->vcmprss_instr[s]);
+		}
+	json_obj_close(fd);
+	json_int(fd, &g, "mask", c->vmask_instr[s]);
+	json_obj_open(fd, &g, "reductions");
+		{ int h = 1; json_int(fd,&h,"total",red_n); json_int(fd,&h,"fp",c->vfp_reductions_n[s]); json_int(fd,&h,"int",c->vint_reductions_n[s]); }
+	json_obj_close(fd);
+	json_obj_open(fd, &g, "computation");
+		{ int h = 1; json_int(fd,&h,"total",c->vcomputation_instr[s]); json_int(fd,&h,"fused",c->vfused_instr[s]); }
+	json_obj_close(fd);
+	json_obj_open(fd, &g, "scalar_deps");
+		{ int h = 1; json_int(fd,&h,"total",scal_deps); json_int(fd,&h,"read_from_scalar",c->inst_s_v[s]); json_int(fd,&h,"write_to_scalar",c->inst_v_s[s]); }
+	json_obj_close(fd);
+	json_obj_close(fd); /* arith */
+
+	json_obj_open(fd, &f, "memory");
+	g = 1;
+	json_int(fd, &g, "instr", mem);
+	json_int(fd, &g, "elems", c->velem_mem[s]);
+	json_num(fd, &g, "avg_vl", safe_div(c->velem_mem[s], mem));
+	json_int(fd, &g, "unit", c->vunit_instr[s]);
+	json_int(fd, &g, "segmented_unit", c->vseg_instr_unit[s]);
+	json_int(fd, &g, "strided", c->vstride_instr[s]);
+	json_num(fd, &g, "avg_stride_b", avg_stride);
+	json_num(fd, &g, "stddev_stride_b", sqrt(stride_var));
+	json_int(fd, &g, "segmented_strided", c->vseg_instr_stride[s]);
+	json_int(fd, &g, "indexed", c->vidx_instr[s]);
+	json_int(fd, &g, "indexed_ordered", c->vidx_instr_ordered[s]);
+	json_int(fd, &g, "indexed_unordered", c->vidx_instr_unordered[s]);
+	json_int(fd, &g, "segmented_indexed", c->vseg_instr_idx[s]);
+	json_int(fd, &g, "whole_register", c->vspill_instr[s]);
+	json_obj_close(fd);
+
+	json_obj_open(fd, &f, "reduction");
+		{ int h = 1; json_int(fd,&h,"instr",red); json_int(fd,&h,"elems",c->velem_reductions[s]); json_int(fd,&h,"fp",c->vfp_reductions[s]); json_int(fd,&h,"int",c->vint_reductions[s]); }
+	json_obj_close(fd);
+	json_obj_open(fd, &f, "mask");
+		{ int h = 1; json_int(fd,&h,"instr",c->vmask_instr[s]); json_int(fd,&h,"elems",c->velem_mask[s]); json_num(fd,&h,"avg_vl",safe_div(c->velem_mask[s], c->vmask_instr[s])); }
+	json_obj_close(fd);
+	json_obj_open(fd, &f, "other");
+		{ int h = 1; json_int(fd,&h,"instr",other); json_int(fd,&h,"elems",elem_other); json_num(fd,&h,"avg_vl",safe_div(elem_other, other)); }
+	json_obj_close(fd);
+
+	json_pop();
+	json_indent(fd);
+	fputc('}', fd);
+}
+
+void print_counters_json(FILE * fd, rave_counters * c){
+	double vecinstr = 0, unique_regs = 0, vl_accum = 0, totinstr, totbytes, totflops;
+	int f = 1, g;
+
+	for(int s=0; s<SEWS; ++s){
+		vecinstr += c->vector_instr[s];
+		vl_accum += c->velem[s];
+	}
+	for(int r=0; r<NUM_VECTOR_REGS; ++r) if (c->vector_register_usage[r] > 0) ++unique_regs;
+	totinstr = c->scalar_instr + c->vsetvl_instr + vecinstr;
+	totbytes = c->moved_bytes_s + c->moved_bytes_v;
+	totflops = c->scalarflops + c->vectorflops;
+
+	fputc('{', fd);
+	json_push();
+
+	json_obj_open(fd, &f, "moved_bytes");
+		{ int h = 1; json_int(fd,&h,"total",totbytes); json_int(fd,&h,"scalar",c->moved_bytes_s); json_int(fd,&h,"vector",c->moved_bytes_v); }
+	json_obj_close(fd);
+
+	json_obj_open(fd, &f, "flops");
+		{ int h = 1; json_int(fd,&h,"total",totflops); json_int(fd,&h,"scalar",c->scalarflops); json_int(fd,&h,"vector",c->vectorflops); }
+	json_obj_close(fd);
+
+	json_obj_open(fd, &f, "global_stats");
+	g = 1;
+	json_num(fd, &g, "avg_vl_elems", safe_div(vl_accum, vecinstr));
+	json_num(fd, &g, "avg_vl_bits", safe_div(c->vl_accumulated_b, vecinstr));
+	json_num(fd, &g, "avg_lmul", safe_div(c->lmul_accumulated, vecinstr));
+	json_num(fd, &g, "avg_occupancy", safe_div(c->occupancy_accumulated, vecinstr));
+	json_int(fd, &g, "vlen_bits", RAVE_VLMAX);
+	json_num(fd, &g, "avg_vlmax_elems", safe_div(c->VLMAX_accumulated, vecinstr));
+	json_int(fd, &g, "tu_effective", c->tu_count);
+	json_int(fd, &g, "ta_effective", c->ta_count);
+	json_int(fd, &g, "unique_vector_registers", unique_regs);
+	json_obj_close(fd);
+
+	json_obj_open(fd, &f, "dependencies");
+	g = 1;
+	json_obj_open(fd, &g, "scalar");
+		{ int h = 1;
+		  json_int(fd,&h,"total",c->RAW_deps + c->WAR_deps + c->WAW_deps);
+		  json_int(fd,&h,"raw",c->RAW_deps);
+		  json_int(fd,&h,"waw",c->WAW_deps);
+		  json_int(fd,&h,"war",c->WAR_deps); }
+	json_obj_close(fd);
+	json_obj_open(fd, &g, "vector");
+		{ int h = 1;
+		  json_int(fd,&h,"total",c->VRAW_deps + c->VWAR_deps + c->VWAW_deps);
+		  json_obj_open(fd,&h,"raw");
+			{ int k = 1; json_int(fd,&k,"count",c->VRAW_deps); json_num(fd,&k,"avg_dist",safe_div(c->avg_VRAW_deps, c->VRAW_deps)); }
+		  json_obj_close(fd);
+		  json_obj_open(fd,&h,"waw");
+			{ int k = 1; json_int(fd,&k,"count",c->VWAW_deps); json_num(fd,&k,"avg_dist",safe_div(c->avg_VWAW_deps, c->VWAW_deps)); }
+		  json_obj_close(fd);
+		  json_obj_open(fd,&h,"war");
+			{ int k = 1; json_int(fd,&k,"count",c->VWAR_deps); json_num(fd,&k,"avg_dist",safe_div(c->avg_VWAR_deps, c->VWAR_deps)); }
+		  json_obj_close(fd); }
+	json_obj_close(fd);
+	json_obj_close(fd);
+
+	json_obj_open(fd, &f, "instructions");
+	g = 1;
+	json_int(fd, &g, "total", totinstr);
+	json_int(fd, &g, "scalar", c->scalar_instr);
+	json_int(fd, &g, "vsetvl", c->vsetvl_instr);
+	json_int(fd, &g, "vector", vecinstr);
+	json_arr_open(fd, &g, "sew");
+	{
+		int ef = 1;
+		for(int s=0; s<SEWS; ++s){
+			json_elem(fd, &ef);
+			print_sew_json(fd, c, s);
+		}
+	}
+	json_arr_close(fd);
+	json_obj_close(fd);
+
+	json_pop();
+	json_indent(fd);
+	fputc('}', fd);
+}

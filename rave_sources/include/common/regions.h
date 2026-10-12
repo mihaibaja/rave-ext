@@ -77,6 +77,8 @@ void internal_begin_region(int cpu_index, const char * name, rave_counters * cur
 void print_region_human(FILE * fd, int n, region_t * region, int accumulate, int indent_region, int last_child, int no_childs);
 void print_region_report(FILE * fd, int accumulate);
 void print_region_csv(FILE * fd, int accumulate);
+void print_region_json(FILE * fd, int accumulate);
+void dfs_json_recursive(region_node_t* curr, FILE * fd, int accumulate, int * nregion, int * first);
 
 void rave_begin_region(char * str_ptr, thread_state_t * state);
 void rave_end_region(char * str_ptr, thread_state_t * state);

@@ -384,3 +384,85 @@ void rave_end_region(char * str_ptr, thread_state_t * state){
 		release_lock(write_lock);
 	}
 }
+
+/* -------------------------------------------------------------------------- */
+/* JSON report                                                                 */
+/* -------------------------------------------------------------------------- */
+
+static void json_region(FILE * fd, int id, region_t * region, rave_counters * counters){
+	int f = 1;
+	fputc('{', fd);
+	json_push();
+	json_int(fd, &f, "id", id);
+	json_str(fd, &f, "name", region->name);
+	json_int(fd, &f, "nesting", region->nesting);
+	json_int(fd, &f, "rank", mpi_rank);
+	json_int(fd, &f, "thread", region->opened_by);
+	json_int(fd, &f, "executions", region->executions);
+	json_str(fd, &f, "parent", region->parent != NULL ? region->parent->name : NULL);
+	json_key_only(fd, &f, "counters");
+	print_counters_json(fd, counters);
+	json_pop();
+	json_indent(fd);
+	fputc('}', fd);
+}
+
+static void json_emit_region(FILE * fd, int * nregion, int * first, region_t * region, rave_counters * delta, rave_counters * acc, int executions, int accumulate){
+	rave_counters tmp;
+	if (accumulate){
+		double exec = executions > 0 ? (double)executions : 1.0;
+		mul_counters(&tmp, acc, 1.0/exec);
+	}else{
+		copy_counters(&tmp, delta);
+	}
+	json_elem(fd, first);
+	json_region(fd, *nregion, region, &tmp);
+	*nregion = *nregion + 1;
+}
+
+void dfs_json_recursive(region_node_t* curr, FILE * fd, int accumulate, int * nregion, int * first){
+	if (curr==NULL) return;
+
+	if (curr->region.closed){
+		json_emit_region(fd, nregion, first, &curr->region, &curr->region.delta_counters, &curr->region.acc_counters, curr->region.executions, accumulate);
+	}
+
+	region_node_t* child = curr->first_child;
+	while(child!=NULL){
+		dfs_json_recursive(child, fd, accumulate, nregion, first);
+		child = child->next_sibling;
+	}
+
+	if (OTHER_CHILDS){
+		region_t other_child;
+		memset(&other_child, 0, sizeof(region_t));
+		ini_other_child(&other_child, curr, accumulate);
+		json_emit_region(fd, nregion, first, &other_child, &other_child.delta_counters, &other_child.acc_counters, other_child.executions, accumulate);
+		free(other_child.name);
+	}
+}
+
+void print_region_json(FILE * fd, int accumulate){
+	int nregion = 0;
+	int first = 1;
+
+	json_reset();
+	fputc('{', fd);
+	json_push();
+	json_str(fd, &first, "generator", "RAVE");
+	json_str(fd, &first, "binary", BINARY_NAME);
+	json_int(fd, &first, "vlen_bits", RAVE_VLMAX);
+	json_bool(fd, &first, "trace_extended", TRACE_EXTENDED);
+	json_bool(fd, &first, "accumulate_regions", accumulate);
+	json_int(fd, &first, "region_count", track_regions.total_regions);
+	json_arr_open(fd, &first, "regions");
+	{
+		int ef = 1;
+		dfs_json_recursive(track_regions.first_region, fd, accumulate, &nregion, &ef);
+	}
+	json_arr_close(fd);
+	json_pop();
+	json_indent(fd);
+	fputs("}\n", fd);
+	fflush(fd);
+}
