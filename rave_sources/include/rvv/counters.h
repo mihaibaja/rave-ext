@@ -48,7 +48,12 @@ struct rave_counters{
                 double vwidening_instr[SEWS];
                 double vmove_instr[SEWS];
                 double vmove_wh_instr[SEWS];
-                double vslide_instr[SEWS];
+                /**Slides */
+                double vslideup_instr[SEWS];
+                double vslide1up_instr[SEWS];
+                double vslidedown_instr[SEWS];
+                double vslide1down_instr[SEWS];
+                /**Others */
                 double vgath_instr[SEWS];
                 double vcmprss_instr[SEWS];
                 double vcomputation_instr[SEWS];

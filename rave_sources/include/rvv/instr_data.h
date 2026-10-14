@@ -49,10 +49,11 @@
  *
  * bits 0..1   vector class
  * bits 2..3   vector arithmetic/memory subtype -> As memory subtype is correctly parsed throughout type we are not going to parse it here.
- * bits 4..5   vector arithmetic operation
- * bits 6..7   vector register transfer
- * bit 8       masked (1) / unmasked (0)
- * bit 9      floating point (1) / integer (0)
+ * bits 4..6   vector arithmetic operation
+ * bits 7..8   vector register transfer
+ * bit 9       masked (1) / unmasked (0)
+ * bit 10      floating point (1) / integer (0)
+ * bit 11-12   specific diferences: e.g. slideup vs slidedown
  */
 #define TYPE_EXT_ARITH               0x0000     // 00
 #define TYPE_EXT_LOAD                0x0001     // 01
@@ -70,7 +71,7 @@
     #define TYPE_EXT_ARITH_COMP_FUSED  0x0050     // 101 (0x0050)
 #define TYPE_EXT_ARITH_REDUCTION     0x0020     // 010 (0x0020)
 #define TYPE_EXT_ARITH_MASK          0x0040     // 100 (0x0040)
-    // Permutation insts
+// Permutation insts
 #define TYPE_EXT_ARITH_MOVE          0x0010     // 001 (0x0010)
 #define TYPE_EXT_ARITH_SLIDE         0x0030     // 011 (0x0030)
 #define TYPE_EXT_ARITH_COMPRESS      0x0060     // 110 (0x0060)
@@ -90,6 +91,15 @@
 #define TYPE_EXT_FP                  0x0400     // bit 10: 1 (0x0400)
 #define TYPE_EXT_INT                 0x0000     // bit 10: 0
 
+// Specific diferences (bits 11 y 12)
+/** SLIDE */
+#define TYPE_EXT_SLIDE_UP            0x0800     // bit 11: 1
+#define TYPE_EXT_SLIDE_DOWN          0x0000     // bit 11: 0    
+#define TYPE_EXT_SLIDE_1             0x1000     // bit 12: 1   
+#define TYPE_EXT_SLIDE_N1            0x0000     // bit 12: 0   
+
+
+
 /** Para el is_type_ext los que tengan 1 único bit de marcado o no, se usará como mascara directamente el TYPE_EXT_XXXX 
  * e.g. is_type_ext(type_ext, TYPE_EXT_MASKED, TYPE_EXT_MASKED) para saber si está marcado el bit 9. Para los que tengan varios
  * bits, se usará la mascara de bits correspondiente, e.g. is_type_ext(type_ext, MASK_EXT_BASE, TYPE_EXT_LOAD) 
@@ -99,6 +109,7 @@
 #define MASK_EXT_SUBTYPE     0x000C     // bits 3:2 (0000 0000 0000 1100)
 #define MASK_EXT_SUBSUBTYPE  0x0070     // bits 6:4 (0000 0000 0111 0000) -> Ampliada a 3 bits
 #define MASK_EXT_OPERAND     0x0180     // bits 8:7 (0000 0001 1000 0000)
+#define MASK_EXT_SPECIFIC    0x1800     // bits 11:12 (0001 1000 1000 0000)
 
 #define is_type_ext(x, mask, y) (((x) & (mask)) == (y))
 

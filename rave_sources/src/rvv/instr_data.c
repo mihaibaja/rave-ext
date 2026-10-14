@@ -286,18 +286,23 @@ uint16_t instr_set_vector_type_ext(uint32_t insn_opcode, char* instr_asm, uint16
 
             /** SLIDE INSTRUCTIONS */
             else if (funct6 == 14 || funct6 == 15) {   
+                type_ext |= (funct6 == 14)?TYPE_EXT_SLIDE_UP:TYPE_EXT_SLIDE_DOWN; // funct6 == 14: slideup; else slidedown
+
                 if(funct3 == 0b100 || funct3 == 0b011){ // vslideup, vslidedown
                     type_ext &= ~MASK_EXT_SUBSUBTYPE;
                     type_ext |= TYPE_EXT_ARITH_SLIDE;
                     type_ext |= TYPE_EXT_INT;
+                    type_ext |= TYPE_EXT_SLIDE_N1;
                 }else if(funct3 == 0b110){              // vslide1up, vslide1down
                     type_ext &= ~MASK_EXT_SUBSUBTYPE;
                     type_ext |= TYPE_EXT_ARITH_SLIDE;
                     type_ext |= TYPE_EXT_INT;
+                    type_ext |= TYPE_EXT_SLIDE_1;
                 }else if(funct3 == 0b101){              // vfslide1up, vfslide1down
                     type_ext &= ~MASK_EXT_SUBSUBTYPE;
                     type_ext |= TYPE_EXT_ARITH_SLIDE;
                     type_ext |= TYPE_EXT_FP;
+                    type_ext |= TYPE_EXT_SLIDE_1;
                 }
             }
 

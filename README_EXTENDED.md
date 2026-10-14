@@ -104,6 +104,7 @@ python3 utils/trace_reader.py rave_inst_trace.jsonl --summary
 ```
 
 Para el explorador interactivo visual:
+(Por el momento test nada más)
 ```bash
 python3 utils/trace_viewer.py rave_inst_trace.jsonl
 ```

@@ -639,7 +639,19 @@ void insn_exec(thread_state_t * state, instr_data * instr){
                         } else if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_GATHER)){
                             ++state->accum_counters.vgath_instr[sew];
                         } else if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_SLIDE)){
-                            ++state->accum_counters.vslide_instr[sew];
+                            if(is_type_ext(instr->type_ext, TYPE_EXT_SLIDE_UP, TYPE_EXT_SLIDE_UP)){
+                                if(is_type_ext(instr->type_ext, TYPE_EXT_SLIDE_1, TYPE_EXT_SLIDE_1)){
+                                    ++state->accum_counters.vslide1up_instr[sew];
+                                }else{
+                                    ++state->accum_counters.vslideup_instr[sew];
+                                }
+                            }else{
+                                if(is_type_ext(instr->type_ext, TYPE_EXT_SLIDE_1, TYPE_EXT_SLIDE_1)){
+                                    ++state->accum_counters.vslide1down_instr[sew];
+                                }else{
+                                    ++state->accum_counters.vslidedown_instr[sew];
+                                }
+                            }
                         } else if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_COMPUTATION) || 
                                   is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_COMP_FUSED)){
                             ++state->accum_counters.vcomputation_instr[sew];

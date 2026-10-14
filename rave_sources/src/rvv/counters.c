@@ -148,7 +148,8 @@ void print_counters_human(FILE * fd, rave_counters * counters){
                 double  totvmem		= counters->vunit_instr[s] + counters->vstride_instr[s] + counters->vidx_instr[s] + counters->vspill_instr[s];
                 double  totvarith	= counters->vfp_instr[s] + counters->vint_instr[s];
                 double  totvarithnormal = totvarith - counters->vwidening_instr[s] - counters->vnarrowing_instr[s];
-                double  totvpermutation = counters->vmove_instr[s] + counters->vslide_instr[s] + counters->vgath_instr[s] + counters->vcmprss_instr[s];
+                double  totvslides  = counters->vslide1down_instr[s]+counters->vslide1up_instr[s]+counters->vslidedown_instr[s]+counters->vslideup_instr[s];
+                double  totvpermutation = counters->vmove_instr[s] + totvslides + counters->vgath_instr[s] + counters->vcmprss_instr[s];
                 //double  totvred	= counters->vfp_reductions[s] + counters->vint_reductions[s];
                 //double  totvother	= counters->vector_instr[s] - totvmem - totvarith - toWtvred - counters->vmask_instr[s];
 
@@ -185,7 +186,14 @@ void print_counters_human(FILE * fd, rave_counters * counters){
                                 indent(fd,  level,1); fprintf(fd,"Others: "); P_NUMBER(fd,"%.0f", totvmoves_other); PERCENTAGE(fd,totvmoves_other,counters->vmove_instr[s],'\n');
                                 --level;
                             }
-                            indent(fd,  level,0); fprintf(fd,"Slides: "); P_NUMBER(fd,"%.0f", counters->vslide_instr[s]); PERCENTAGE(fd,counters->vslide_instr[s], totvarithnormal,'\n');
+                            indent(fd,  level,0); fprintf(fd,"Slides: "); P_NUMBER(fd,"%.0f", totvslides); PERCENTAGE(fd,totvslides, totvarithnormal,'\n');
+                            if(totvslides > 0){
+                                indent(fd,++level,0); fprintf(fd,"slideup: "); P_NUMBER(fd,"%.0f", counters->vslideup_instr[s]); PERCENTAGE(fd,counters->vslideup_instr[s], totvslides,'\n');
+                                indent(fd,  level,0); fprintf(fd,"slide1up: "); P_NUMBER(fd,"%.0f", counters->vslide1up_instr[s]); PERCENTAGE(fd,counters->vslide1up_instr[s], totvslides,'\n');
+                                indent(fd,  level,0); fprintf(fd,"slidedown: "); P_NUMBER(fd,"%.0f", counters->vslidedown_instr[s]); PERCENTAGE(fd,counters->vslidedown_instr[s], totvslides,'\n');
+                                indent(fd,  level,1); fprintf(fd,"slide1down: "); P_NUMBER(fd,"%.0f", counters->vslide1down_instr[s]); PERCENTAGE(fd,counters->vslide1down_instr[s], totvslides,'\n');
+                                --level;
+                            }
                             indent(fd,  level,0); fprintf(fd,"Gather: "); P_NUMBER(fd,"%.0f", counters->vgath_instr[s]); PERCENTAGE(fd,counters->vgath_instr[s], totvarithnormal,'\n');
                             indent(fd,  level,1); fprintf(fd,"Compress: "); P_NUMBER(fd,"%.0f", counters->vcmprss_instr[s]); PERCENTAGE(fd,counters->vcmprss_instr[s], totvarithnormal,'\n');
                             --level;
