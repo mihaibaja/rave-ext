@@ -318,7 +318,8 @@ static void print_sew_json(FILE * fd, rave_counters * c, int s){
 	double mem         = c->vunit_instr[s] + c->vstride_instr[s] + c->vidx_instr[s] + c->vspill_instr[s];
 	double red         = c->vfp_reductions[s] + c->vint_reductions[s];
 	double arith_norm  = arith - c->vwidening_instr[s] - c->vnarrowing_instr[s];
-	double perm        = c->vmove_instr[s] + c->vslide_instr[s] + c->vgath_instr[s] + c->vcmprss_instr[s];
+	double slides      = c->vslideup_instr[s] + c->vslide1up_instr[s] + c->vslidedown_instr[s] + c->vslide1down_instr[s];
+	double perm        = c->vmove_instr[s] + slides + c->vgath_instr[s] + c->vcmprss_instr[s];
 	double red_n       = c->vfp_reductions_n[s] + c->vint_reductions_n[s];
 	double scal_deps   = c->inst_s_v[s] + c->inst_v_s[s];
 	double moves_other = c->vmove_instr[s] - (c->m_inst_s_v[s] + c->m_inst_v_s[s] - c->vmove_wh_instr[s]);
@@ -364,7 +365,7 @@ static void print_sew_json(FILE * fd, rave_counters * c, int s){
 				  json_int(fd,&k,"others",moves_other);
 				}
 			json_obj_close(fd);
-			json_int(fd, &h, "slides", c->vslide_instr[s]);
+			json_int(fd, &h, "slides", slides);
 			json_int(fd, &h, "gather", c->vgath_instr[s]);
 			json_int(fd, &h, "compress", c->vcmprss_instr[s]);
 		}
