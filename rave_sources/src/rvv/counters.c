@@ -312,104 +312,38 @@ static double safe_div(double num, double den){
 }
 
 static void print_sew_json(FILE * fd, rave_counters * c, int s){
-	double instr       = c->vector_instr[s];
-	double elems       = c->velem[s];
-	double arith       = c->vfp_instr[s] + c->vint_instr[s];
-	double mem         = c->vunit_instr[s] + c->vstride_instr[s] + c->vidx_instr[s] + c->vspill_instr[s];
-	double red         = c->vfp_reductions[s] + c->vint_reductions[s];
-	double arith_norm  = arith - c->vwidening_instr[s] - c->vnarrowing_instr[s];
-	double slides      = c->vslideup_instr[s] + c->vslide1up_instr[s] + c->vslidedown_instr[s] + c->vslide1down_instr[s];
-	double perm        = c->vmove_instr[s] + slides + c->vgath_instr[s] + c->vcmprss_instr[s];
-	double red_n       = c->vfp_reductions_n[s] + c->vint_reductions_n[s];
-	double scal_deps   = c->inst_s_v[s] + c->inst_v_s[s];
-	double moves_other = c->vmove_instr[s] - (c->m_inst_s_v[s] + c->m_inst_v_s[s] - c->vmove_wh_instr[s]);
-	double other       = instr - mem - arith - red - c->vmask_instr[s];
-	double elem_other  = elems - c->velem_arith[s] - c->velem_reductions[s] - c->velem_mem[s] - c->velem_mask[s];
-	double avg_stride  = safe_div(c->agg_strides[s], c->vstride_instr[s]);
-	double stride_var  = c->vstride_instr[s] > 0 ? (c->agg_strides_squared[s]/c->vstride_instr[s] - avg_stride*avg_stride) : 0.0;
-	int f = 1, g;
+	/* El detalle de QUE instrucciones se han ejecutado sale del arbol de
+	 * categorias (nivel de region). Aqui quedan las estadisticas, incluidas las
+	 * dos que NO se pueden deducir de el:
+	 *   - los elementos procesados por tipo de operacion (el arbol cuenta
+	 *     instrucciones, no elementos), que ademas se solapan: una mascara suma
+	 *     en `arith` y en `mask`, asi que su suma puede pasar de `elems`.
+	 *   - el stride medio (y su desviacion) de los accesos strided, que es una
+	 *     media interna, no un recuento.
+	 */
+	double avg_stride = safe_div(c->agg_strides[s], c->vstride_instr[s]);
+	double stride_var = c->vstride_instr[s] > 0
+		? (c->agg_strides_squared[s]/c->vstride_instr[s] - avg_stride*avg_stride)
+		: 0.0;
+	int f = 1;
 
 	if (stride_var < 0) stride_var = 0;
 
 	fputc('{', fd);
 	json_push();
 	json_int(fd, &f, "sew", 1 << (s+3));
-	json_int(fd, &f, "instr", instr);
-	json_int(fd, &f, "elems", elems);
-	json_num(fd, &f, "avg_vl", safe_div(elems, instr));
-
-	json_obj_open(fd, &f, "arith");
-	g = 1;
-	json_int(fd, &g, "instr", arith);
-	json_int(fd, &g, "elems", c->velem_arith[s]);
-	json_num(fd, &g, "avg_vl", safe_div(c->velem_arith[s], arith));
-	json_int(fd, &g, "fp", c->vfp_instr[s]);
-	json_int(fd, &g, "int", c->vint_instr[s]);
-	json_int(fd, &g, "narrowing", c->vnarrowing_instr[s]);
-	json_int(fd, &g, "widening", c->vwidening_instr[s]);
-	json_obj_open(fd, &g, "widening_reductions");
-		{ int h = 1; json_int(fd,&h,"total",red); json_int(fd,&h,"fp",c->vfp_reductions[s]); json_int(fd,&h,"int",c->vint_reductions[s]); }
+	json_int(fd, &f, "instr", c->vector_instr[s]);
+	json_int(fd, &f, "elems", c->velem[s]);
+	json_num(fd, &f, "avg_vl", safe_div(c->velem[s], c->vector_instr[s]));
+	json_obj_open(fd, &f, "elems_by_kind");
+		{ int h = 1;
+		  json_int(fd, &h, "arith", c->velem_arith[s]);
+		  json_int(fd, &h, "memory", c->velem_mem[s]);
+		  json_int(fd, &h, "reduction", c->velem_reductions[s]);
+		  json_int(fd, &h, "mask", c->velem_mask[s]); }
 	json_obj_close(fd);
-	json_int(fd, &g, "widening_fused", c->vwfused_instr[s]);
-	json_int(fd, &g, "normal", arith_norm);
-	json_obj_open(fd, &g, "permutations");
-		{
-			int h = 1;
-			json_int(fd, &h, "total", perm);
-			json_obj_open(fd, &h, "moves");
-				{ int k = 1;
-				  json_int(fd,&k,"total",c->vmove_instr[s]);
-				  json_int(fd,&k,"read_from_scalar",c->m_inst_s_v[s]);
-				  json_int(fd,&k,"write_to_scalar",c->m_inst_v_s[s]);
-				  json_int(fd,&k,"whole_register",c->vmove_wh_instr[s]);
-				  json_int(fd,&k,"others",moves_other);
-				}
-			json_obj_close(fd);
-			json_int(fd, &h, "slides", slides);
-			json_int(fd, &h, "gather", c->vgath_instr[s]);
-			json_int(fd, &h, "compress", c->vcmprss_instr[s]);
-		}
-	json_obj_close(fd);
-	json_int(fd, &g, "mask", c->vmask_instr[s]);
-	json_obj_open(fd, &g, "reductions");
-		{ int h = 1; json_int(fd,&h,"total",red_n); json_int(fd,&h,"fp",c->vfp_reductions_n[s]); json_int(fd,&h,"int",c->vint_reductions_n[s]); }
-	json_obj_close(fd);
-	json_obj_open(fd, &g, "computation");
-		{ int h = 1; json_int(fd,&h,"total",c->vcomputation_instr[s]); json_int(fd,&h,"fused",c->vfused_instr[s]); }
-	json_obj_close(fd);
-	json_obj_open(fd, &g, "scalar_deps");
-		{ int h = 1; json_int(fd,&h,"total",scal_deps); json_int(fd,&h,"read_from_scalar",c->inst_s_v[s]); json_int(fd,&h,"write_to_scalar",c->inst_v_s[s]); }
-	json_obj_close(fd);
-	json_obj_close(fd); /* arith */
-
-	json_obj_open(fd, &f, "memory");
-	g = 1;
-	json_int(fd, &g, "instr", mem);
-	json_int(fd, &g, "elems", c->velem_mem[s]);
-	json_num(fd, &g, "avg_vl", safe_div(c->velem_mem[s], mem));
-	json_int(fd, &g, "unit", c->vunit_instr[s]);
-	json_int(fd, &g, "segmented_unit", c->vseg_instr_unit[s]);
-	json_int(fd, &g, "strided", c->vstride_instr[s]);
-	json_num(fd, &g, "avg_stride_b", avg_stride);
-	json_num(fd, &g, "stddev_stride_b", sqrt(stride_var));
-	json_int(fd, &g, "segmented_strided", c->vseg_instr_stride[s]);
-	json_int(fd, &g, "indexed", c->vidx_instr[s]);
-	json_int(fd, &g, "indexed_ordered", c->vidx_instr_ordered[s]);
-	json_int(fd, &g, "indexed_unordered", c->vidx_instr_unordered[s]);
-	json_int(fd, &g, "segmented_indexed", c->vseg_instr_idx[s]);
-	json_int(fd, &g, "whole_register", c->vspill_instr[s]);
-	json_obj_close(fd);
-
-	json_obj_open(fd, &f, "reduction");
-		{ int h = 1; json_int(fd,&h,"instr",red); json_int(fd,&h,"elems",c->velem_reductions[s]); json_int(fd,&h,"fp",c->vfp_reductions[s]); json_int(fd,&h,"int",c->vint_reductions[s]); }
-	json_obj_close(fd);
-	json_obj_open(fd, &f, "mask");
-		{ int h = 1; json_int(fd,&h,"instr",c->vmask_instr[s]); json_int(fd,&h,"elems",c->velem_mask[s]); json_num(fd,&h,"avg_vl",safe_div(c->velem_mask[s], c->vmask_instr[s])); }
-	json_obj_close(fd);
-	json_obj_open(fd, &f, "other");
-		{ int h = 1; json_int(fd,&h,"instr",other); json_int(fd,&h,"elems",elem_other); json_num(fd,&h,"avg_vl",safe_div(elem_other, other)); }
-	json_obj_close(fd);
-
+	json_num(fd, &f, "avg_stride_b", avg_stride);
+	json_num(fd, &f, "stddev_stride_b", sqrt(stride_var));
 	json_pop();
 	json_indent(fd);
 	fputc('}', fd);
@@ -476,7 +410,7 @@ void print_counters_json(FILE * fd, rave_counters * c){
 	json_obj_close(fd);
 	json_obj_close(fd);
 
-	json_obj_open(fd, &f, "instructions");
+	json_obj_open(fd, &f, "instructions_previous_version");
 	g = 1;
 	json_int(fd, &g, "total", totinstr);
 	json_int(fd, &g, "scalar", c->scalar_instr);
@@ -491,9 +425,58 @@ void print_counters_json(FILE * fd, rave_counters * c){
 		}
 	}
 	json_arr_close(fd);
-	json_obj_close(fd);
+	json_obj_close(fd);     /* cierra "instructions_previous_version" */
 
-	json_pop();
+	json_pop();             /* cierra "counters" */
 	json_indent(fd);
 	fputc('}', fd);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Arbol de contadores por instruccion (mismos niveles que docs/rvv instr.md)  */
+/* -------------------------------------------------------------------------- */
+
+/* Suma cada contador sobre los cuatro SEW y acumula por categoria (una
+ * instruccion pertenece a su categoria hoja y a toda su cadena de padres). */
+static void vinstr_totals(rave_counters * c, double * instr_tot, double * cat_tot){
+	int i, cat;
+	for (i = 0; i < RAVE_VINSTR_COUNT; ++i){
+		double total = 0;
+		for (int s = 0; s < SEWS; ++s) total += c->vinstr[i][s];
+		instr_tot[i] = total;
+	}
+	for (i = 0; i < RAVE_VINSTR_NCAT; ++i) cat_tot[i] = 0;
+	for (i = 0; i < RAVE_VINSTR_COUNT; ++i)
+		for (cat = rave_vinstr_category_of(i); cat >= 0; cat = rave_vinstr_categories[cat].parent)
+			cat_tot[cat] += instr_tot[i];
+}
+
+/* Un objeto por categoria con las instrucciones que ha ejecutado la region (y
+ * las subcategorias con cuenta). Las categorias e instrucciones a cero no se
+ * emiten, para que el JSON no lleve 630 claves vacias. */
+static void print_instr_category_json(FILE * fd, int * first, int cat,
+                                     const double * instr_tot, const double * cat_tot){
+	int inner = 1;
+	json_obj_open(fd, first, rave_vinstr_categories[cat].name);
+	for (int c = 0; c < RAVE_VINSTR_NCAT; ++c)
+		if (rave_vinstr_categories[c].parent == cat && cat_tot[c] > 0)
+			print_instr_category_json(fd, &inner, c, instr_tot, cat_tot);
+	for (int i = 0; i < RAVE_VINSTR_COUNT; ++i)
+		if (rave_vinstr_category_of(i) == cat && instr_tot[i] > 0)
+			json_int(fd, &inner, rave_vinstr_name(i), instr_tot[i]);
+	json_obj_close(fd);
+}
+
+void print_instr_tree_json(FILE * fd, int * first, rave_counters * counters){
+	double instr_tot[RAVE_VINSTR_COUNT];
+	double cat_tot[RAVE_VINSTR_NCAT];
+	int inner = 1;
+	vinstr_totals(counters, instr_tot, cat_tot);
+	/* Las estadisticas de siempre viven en counters.instructions_previous_version;
+	 * el recuento por instruccion del listado va aqui, en "instructions". */
+	json_obj_open(fd, first, "instructions");
+	for (int cat = 0; cat < RAVE_VINSTR_NCAT; ++cat)
+		if (rave_vinstr_categories[cat].parent == -1 && cat_tot[cat] > 0)
+			print_instr_category_json(fd, &inner, cat, instr_tot, cat_tot);
+	json_obj_close(fd);
 }

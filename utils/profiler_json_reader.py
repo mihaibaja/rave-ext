@@ -22,6 +22,7 @@ Uso:
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -32,34 +33,6 @@ DEFAULT_SCHEMA = REPO_ROOT / "schema" / "profiler_json_schema_v1.json"
 # los contadores son medias por ejecucion y el redondeo a entero puede desviar
 # una unidad; de ahi la tolerancia.
 TOLERANCE = 0.5
-
-# Campos que solo se calculan con traza extendida (RAVE_TRACE_EXTENDED=1).
-# Fuente: docs/PROFILER_JSON_API.md, seccion 1.4.
-EXTENDED_ONLY_FIELDS = (
-    "arith.narrowing",
-    "arith.widening",
-    "arith.widening_reductions.total",
-    "arith.widening_reductions.fp",
-    "arith.widening_reductions.int",
-    "arith.widening_fused",
-    "arith.normal",
-    "arith.permutations.total",
-    "arith.permutations.moves.total",
-    "arith.permutations.slides",
-    "arith.permutations.gather",
-    "arith.permutations.compress",
-    "arith.mask",
-    "arith.reductions.total",
-    "arith.computation.total",
-    "arith.computation.fused",
-    "arith.scalar_deps.total",
-    "memory.segmented_unit",
-    "memory.segmented_strided",
-    "memory.segmented_indexed",
-    "memory.indexed_ordered",
-    "memory.indexed_unordered",
-    "memory.stddev_stride_b",
-)
 
 
 class SchemaError(Exception):
@@ -147,6 +120,10 @@ def validate_instance(instance, schema, root, path="$"):
         if len(instance) < schema["minLength"]:
             errors.append(f"{path}: cadena vacia (minLength {schema['minLength']})")
 
+    if isinstance(instance, str) and "pattern" in schema:
+        if re.search(schema["pattern"], instance) is None:
+            errors.append(f"{path}: {instance!r} no casa con {schema['pattern']!r}")
+
     if isinstance(instance, (int, float)) and not isinstance(instance, bool):
         if "minimum" in schema and instance < schema["minimum"]:
             errors.append(f"{path}: {instance} < minimo {schema['minimum']}")
@@ -176,6 +153,10 @@ def validate_instance(instance, schema, root, path="$"):
                 errors.append(f"{child_path}: campo no documentado en el esquema")
             elif isinstance(extra, dict):
                 errors += validate_instance(value, extra, root, child_path)
+        if "propertyNames" in schema:
+            for name in instance:
+                errors += validate_instance(name, schema["propertyNames"], root,
+                                            f"{path}.{name} (clave)")
 
     return errors
 
@@ -230,6 +211,48 @@ def _get(node, dotted):
     return cur
 
 
+def _sum_tree(node):
+    """Suma todos los contadores de un subarbol de categorias."""
+    total = 0
+    for value in node.values():
+        total += _sum_tree(value) if isinstance(value, dict) else value
+    return total
+
+
+def instruction_tree(region):
+    """Contadores por instruccion de una region (``region["instructions"]``).
+
+    Son los niveles del listado (``docs/rvv instr.md``):
+    ``{"vector_loads_and_stores": {"unit_stride": {"vle32_v_counter": 3}}}``.
+    """
+    return dict(region.get("instructions") or {})
+
+
+def instruction_counters(region):
+    """Contadores por instruccion de una region, aplanados.
+
+    ``{"vle32_v_counter": 3, "vadd_vx_counter": 1, ...}``.
+    """
+    flat = {}
+
+    def walk(node):
+        for name, value in node.items():
+            if isinstance(value, dict):
+                walk(value)
+            elif isinstance(value, (int, float)):
+                flat[name] = flat.get(name, 0) + value
+
+    walk(instruction_tree(region))
+    return flat
+
+
+def category_totals(region):
+    """Instrucciones de cada seccion del listado (primer nivel del arbol)."""
+    return {name: _sum_tree(value)
+            for name, value in instruction_tree(region).items()
+            if isinstance(value, dict)}
+
+
 def check_invariants(doc):
     """Comprueba las descomposiciones de ``docs/PROFILER_JSON_API.md``.
 
@@ -255,7 +278,7 @@ def check_invariants(doc):
     for index, region in enumerate(regions):
         where = f"regions[{index}] ({region.get('name')})"
         counters = region.get("counters") or {}
-        inst = counters.get("instructions") or {}
+        inst = counters.get("instructions_previous_version") or {}
 
         if {"total", "scalar", "vsetvl", "vector"} <= set(inst):
             if not _close(inst["total"], inst["scalar"] + inst["vsetvl"] + inst["vector"],
@@ -279,55 +302,32 @@ def check_invariants(doc):
                 errors.append(f"{sew_where}: sew={block['sew']}, "
                               f"esperado {expected_sew} en la posicion {position}")
 
-            arith = block.get("arith") or {}
-            memory = block.get("memory") or {}
-            reduction = block.get("reduction") or {}
+            # Elementos por tipo: se solapan entre si (una mascara suma en arith y
+            # en mask), asi que su SUMA puede pasar de elems, pero cada uno por
+            # separado no.
+            by_kind = block.get("elems_by_kind") or {}
+            elems = block.get("elems")
+            if isinstance(elems, (int, float)):
+                for kind, value in sorted(by_kind.items()):
+                    if isinstance(value, (int, float)) and value > elems + TOLERANCE:
+                        errors.append(f"{sew_where}: elems_by_kind.{kind} ({value}) > "
+                                      f"elems ({elems})")
 
-            if {"instr", "fp", "int"} <= set(arith):
-                if not _close(arith["instr"], arith["fp"] + arith["int"], terms=2,
-                              accumulate=accumulate):
-                    errors.append(f"{sew_where}: arith.instr ({arith['instr']}) != "
-                                  f"fp+int ({arith['fp'] + arith['int']})")
-            if {"instr", "narrowing", "widening", "normal"} <= set(arith):
-                shape = arith["narrowing"] + arith["widening"] + arith["normal"]
-                if not _close(arith["instr"], shape, terms=3, accumulate=accumulate):
-                    errors.append(f"{sew_where}: arith.instr ({arith['instr']}) != "
-                                  f"narrowing+widening+normal ({shape})")
-
-            if {"instr", "unit", "strided", "indexed", "whole_register"} <= set(memory):
-                total = (memory["unit"] + memory["strided"] + memory["indexed"] +
-                         memory["whole_register"])
-                if not _close(memory["instr"], total, terms=4, accumulate=accumulate):
-                    errors.append(f"{sew_where}: memory.instr ({memory['instr']}) != "
-                                  f"unit+strided+indexed+whole_register ({total})")
-                if "indexed_ordered" in memory and "indexed_unordered" in memory:
-                    ordered = memory["indexed_ordered"] + memory["indexed_unordered"]
-                    if not _close(memory["indexed"], ordered, terms=2,
-                                  accumulate=accumulate):
-                        errors.append(f"{sew_where}: memory.indexed ({memory['indexed']}) "
-                                      f"!= indexed_ordered+indexed_unordered ({ordered})")
-
-            if {"instr", "fp", "int"} <= set(reduction):
-                if not _close(reduction["instr"], reduction["fp"] + reduction["int"],
-                              terms=2, accumulate=accumulate):
-                    errors.append(f"{sew_where}: reduction.instr ({reduction['instr']}) "
-                                  f"!= fp+int ({reduction['fp'] + reduction['int']})")
-
-            widening_red = arith.get("widening_reductions") or {}
-            if "total" in widening_red and "instr" in reduction:
-                if not _close(widening_red["total"], reduction["instr"]):
-                    warnings.append(f"{sew_where}: arith.widening_reductions.total "
-                                    f"({widening_red['total']}) != reduction.instr "
-                                    f"({reduction['instr']}); segun el contrato "
-                                    f"duplican el mismo contador interno")
-
-            if not extended:
-                nonzero = [field for field in EXTENDED_ONLY_FIELDS
-                           if _get(block, field) not in (0, None)]
-                if nonzero:
-                    warnings.append(f"{sew_where}: trace_extended=false pero hay "
-                                    f"campos extendidos distintos de 0: "
-                                    f"{', '.join(nonzero)}")
+        # Contadores por instruccion: cada instruccion vectorial y cada vset*
+        # tiene el suyo, asi que la suma del arbol de categorias es total -
+        # scalar. Si baja es que hay un mnemonico que la tabla no conoce
+        # todavia (aviso); si sube, el fichero es incoherente (error).
+        counted = instruction_counters(region)
+        if counted:
+            total_counted = sum(counted.values())
+            expected = inst.get("total", 0) - inst.get("scalar", 0)
+            if total_counted > expected and not accumulate:
+                errors.append(f"{where}: suma de los contadores por instruccion "
+                              f"({total_counted}) > total - scalar ({expected})")
+            elif total_counted < expected:
+                warnings.append(f"{where}: los contadores por instruccion cubren "
+                                f"{total_counted} de {expected} instrucciones "
+                                f"(mnemonicos no reconocidos por la tabla)")
 
     return errors, warnings
 
@@ -351,7 +351,7 @@ def summarize(doc):
     for index, region in enumerate(doc.get("regions") or []):
         counters = region.get("counters") or {}
         stats = counters.get("global_stats") or {}
-        inst = counters.get("instructions") or {}
+        inst = counters.get("instructions_previous_version") or {}
         occupancy = stats.get("avg_occupancy")
         occupancy_txt = f"{occupancy * 100:.2f}%" if isinstance(occupancy, (int, float)) else "n/a"
         lines.append(
@@ -361,48 +361,57 @@ def summarize(doc):
             f"avg_vl={stats.get('avg_vl_elems')} occupancy={occupancy_txt}"
         )
         for block in inst.get("sew") or []:
-            memory = block.get("memory") or {}
             if not block.get("instr"):
                 continue
-            mem_txt = (f"unit={memory.get('unit')} strided={memory.get('strided')} "
-                       f"indexed={memory.get('indexed')}")
-            if "indexed_ordered" in memory or "indexed_unordered" in memory:
-                mem_txt += (f" (ordered={memory.get('indexed_ordered', 0)} "
-                            f"unordered={memory.get('indexed_unordered', 0)})")
             lines.append(
                 f"    SEW{block.get('sew')}: instr={block.get('instr')} "
-                f"elems={block.get('elems')} avg_vl={block.get('avg_vl')} | {mem_txt}"
+                f"elems={block.get('elems')} avg_vl={block.get('avg_vl')}"
             )
+        totals = category_totals(region)
+        if totals:
+            lines.append("    por categoria: "
+                         + ", ".join(f"{name}={count}"
+                                     for name, count in sorted(totals.items())))
+        counted = instruction_counters(region)
+        if counted:
+            top = sorted(counted.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
+            lines.append("    top_instr: "
+                         + ", ".join(f"{name}={count}" for name, count in top))
 
     return lines
 
 
 def dump(doc):
-    """Volcado por region/bloque SEW de la aritmetica y la memoria."""
+    """Volcado por region: estadisticas, bloques SEW y arbol de instrucciones."""
     lines = []
     for index, region in enumerate(doc.get("regions") or []):
         lines.append(f"region[{index}] name={region.get('name')} "
                      f"nesting={region.get('nesting')} parent={region.get('parent')}")
-        instructions = (region.get("counters") or {}).get("instructions") or {}
+        instructions = (region.get("counters") or {}).get(
+            "instructions_previous_version") or {}
         lines.append(f"  instructions: total={instructions.get('total')} "
                      f"scalar={instructions.get('scalar')} "
                      f"vsetvl={instructions.get('vsetvl')} "
                      f"vector={instructions.get('vector')}")
         for block in instructions.get("sew") or []:
-            arith = block.get("arith") or {}
-            memory = block.get("memory") or {}
-            lines.append(
-                f"  sew={block.get('sew'):>2}  instr={block.get('instr'):>8} "
-                f"elems={block.get('elems'):>10} avg_vl={block.get('avg_vl'):>8} | "
-                f"arith fp/int={arith.get('fp')}/{arith.get('int')} "
-                f"narrow/widen/normal="
-                f"{arith.get('narrowing')}/{arith.get('widening')}/{arith.get('normal')} | "
-                f"mem unit/strided/indexed/whole="
-                f"{memory.get('unit')}/{memory.get('strided')}/"
-                f"{memory.get('indexed')}/{memory.get('whole_register')} "
-                f"ordered/unordered="
-                f"{memory.get('indexed_ordered', 0)}/{memory.get('indexed_unordered', 0)}"
-            )
+            kinds = block.get("elems_by_kind") or {}
+            lines.append(f"  sew={block.get('sew'):>2}  instr={block.get('instr'):>8} "
+                         f"elems={block.get('elems'):>10} avg_vl={block.get('avg_vl'):>8} "
+                         f"| elems arith/mem/red/mask="
+                         f"{kinds.get('arith', 0)}/{kinds.get('memory', 0)}/"
+                         f"{kinds.get('reduction', 0)}/{kinds.get('mask', 0)} "
+                         f"| stride={block.get('avg_stride_b', 0)}"
+                         f"±{block.get('stddev_stride_b', 0)}")
+
+        def walk(node, depth):
+            for name, value in node.items():
+                if isinstance(value, dict):
+                    lines.append("  " + "  " * depth + f"{name}:")
+                    walk(value, depth + 1)
+                else:
+                    lines.append("  " + "  " * depth + f"{name}={value}")
+
+        walk(instruction_tree(region), 1)
     return lines
 
 

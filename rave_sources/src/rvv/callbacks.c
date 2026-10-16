@@ -560,6 +560,9 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 		state->scalar_instr_since_vector=0;
 		++state->accum_counters.vector_instr[sew];
 		state->accum_counters.velem[sew] += vl;
+		// Contador propio de la instruccion (independiente de TRACE_EXTENDED).
+		if (instr->vinstr_idx >= 0)
+			++state->accum_counters.vinstr[instr->vinstr_idx][sew];
 
         if(TRACE_EXTENDED){
             // To track accumulated vl, lmul, occupancy...
@@ -734,6 +737,8 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 	}else if (is_type(instr->type, T_VSETVL)){ 
 		loop_profile->loop_weight += 1;
 		++state->accum_counters.vsetvl_instr;
+		if (instr->vinstr_idx >= 0)
+			++state->accum_counters.vinstr[instr->vinstr_idx][sew];
 	}
 
 	thread_timestamp++;

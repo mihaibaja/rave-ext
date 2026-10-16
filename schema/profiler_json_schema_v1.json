@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "RAVE Profiler JSON Schema",
-  "version": "1.0.0",
-  "description": "Esquema del JSON de contadores por region que genera RAVE (RAVE_PRINT_JSON / rave --json) y que consume el visor ../profiler/. El contrato campo a campo esta documentado en docs/PROFILER_JSON_API.md; este fichero es su version legible por maquina. Notas: (1) el documento NO lleva campo de version, `generator` identifica quien lo escribio; (2) los recuentos se emiten con %.0f, por eso son `integer`, mientras que las medias/ratios se emiten como `number` (un real entero sale sin parte decimal, p. ej. \"avg_lmul\": 1); (3) `binary`, `name` y `parent` pueden ser null; (4) other.instr/other.elems pueden ser NEGATIVOS porque `other` es un residuo (ver docs/PROFILER_JSON_API.md 1.5); (5) additionalProperties=false a proposito: el objetivo del esquema es detectar campos nuevos o desaparecidos (p. ej. indexed_ordered/indexed_unordered).",
+  "version": "2.0.0",
+  "description": "Esquema del JSON de contadores por region que genera RAVE (RAVE_PRINT_JSON / rave --json) y que consume el visor ../profiler/. El contrato campo a campo esta documentado en docs/PROFILER_JSON_API.md; este fichero es su version legible por maquina. Notas: (1) el documento NO lleva campo de version, `generator` identifica quien lo escribio; (2) los recuentos se emiten con %.0f, por eso son `integer`, mientras que las medias/ratios se emiten como `number` (un real entero sale sin parte decimal, p. ej. \"avg_lmul\": 1); (3) `binary`, `name` y `parent` pueden ser null; (4) los contadores por instruccion cuelgan DIRECTAMENTE de cada region, con los mismos niveles que docs/rvv instr.md ($defs/category): en `counters` ya no hay desgloses arith/memory/reduction/mask/other ni contadores agregados, se deducen de las categorias; (5) additionalProperties=false a proposito: el objetivo del esquema es detectar campos nuevos o desaparecidos.",
   "type": "object",
   "required": [
     "generator",
@@ -31,7 +31,7 @@
     },
     "trace_extended": {
       "type": "boolean",
-      "description": "Si se tomaron las metricas extendidas (RAVE_TRACE_EXTENDED)."
+      "description": "Si se tomaron las metricas extendidas (RAVE_TRACE_EXTENDED). Los contadores por instruccion no dependen de esto."
     },
     "accumulate_regions": {
       "type": "boolean",
@@ -51,6 +51,7 @@
   "$defs": {
     "region": {
       "type": "object",
+      "description": "Primer nivel del documento. Ademas de las estadisticas y las dependencias (counters), cada region lleva en `instructions` los contadores por instruccion con los niveles del listado (docs/rvv instr.md).",
       "required": [
         "id",
         "name",
@@ -59,7 +60,8 @@
         "thread",
         "executions",
         "parent",
-        "counters"
+        "counters",
+        "instructions"
       ],
       "additionalProperties": false,
       "properties": {
@@ -96,20 +98,24 @@
           "type": ["string", "null"],
           "description": "Nombre de la region padre, o null si es raiz."
         },
-        "counters": { "$ref": "#/$defs/counters" }
+        "counters": { "$ref": "#/$defs/counters" },
+        "instructions": { "$ref": "#/$defs/instructionsTree" }
       }
     },
 
     "counters": {
       "type": "object",
-      "required": ["moved_bytes", "flops", "global_stats", "dependencies", "instructions"],
+      "description": "Estadisticas y dependencias de la region. Ya NO lleva contadores por instruccion (estan en la propia region) ni desgloses arith/memory/reduction/mask/other.",
+      "required": ["moved_bytes", "flops", "global_stats", "dependencies",
+                   "instructions_previous_version"],
       "additionalProperties": false,
       "properties": {
         "moved_bytes": { "$ref": "#/$defs/triple" },
         "flops": { "$ref": "#/$defs/triple" },
         "global_stats": { "$ref": "#/$defs/globalStats" },
         "dependencies": { "$ref": "#/$defs/dependencies" },
-        "instructions": { "$ref": "#/$defs/instructions" }
+        "instructions_previous_version":
+          { "$ref": "#/$defs/instructionsPreviousVersion" }
       }
     },
 
@@ -228,9 +234,9 @@
       }
     },
 
-    "instructions": {
+    "instructionsPreviousVersion": {
       "type": "object",
-      "description": "total = scalar + vsetvl + vector, y vector = suma de sew[i].instr.",
+      "description": "Recuentos de instrucciones de la region: total = scalar + vsetvl + vector, y vector = suma de sew[i].instr. El desglose por instruccion esta en las categorias de la region, y su suma es total - scalar.",
       "required": ["total", "scalar", "vsetvl", "vector", "sew"],
       "additionalProperties": false,
       "properties": {
@@ -250,7 +256,9 @@
 
     "sewBlock": {
       "type": "object",
-      "required": ["sew", "instr", "elems", "avg_vl", "arith", "memory", "reduction", "mask", "other"],
+      "description": "Estadisticas de las instrucciones vectoriales ejecutadas con ese SEW. El detalle de QUE instrucciones se han ejecutado no se repite aqui: esta en las categorias de la region.",
+      "required": ["sew", "instr", "elems", "avg_vl", "elems_by_kind",
+                   "avg_stride_b", "stddev_stride_b"],
       "additionalProperties": false,
       "properties": {
         "sew": {
@@ -260,186 +268,47 @@
         "instr": { "type": "integer", "minimum": 0 },
         "elems": { "type": "integer", "minimum": 0 },
         "avg_vl": { "type": "number", "minimum": 0 },
-        "arith": { "$ref": "#/$defs/arith" },
-        "memory": { "$ref": "#/$defs/memory" },
-        "reduction": { "$ref": "#/$defs/countTriple" },
-        "mask": { "$ref": "#/$defs/instrElemsAvgVl" },
-        "other": {
-          "allOf": [{ "$ref": "#/$defs/instrElemsAvgVl" }],
-          "description": "Residuo, NO una categoria: instr = instr - memory.instr - arith.instr - reduction.instr - mask.instr. Puede ser NEGATIVO (ver docs/PROFILER_JSON_API.md 1.5)."
-        }
-      }
-    },
-
-    "instrElemsAvgVl": {
-      "type": "object",
-      "required": ["instr", "elems", "avg_vl"],
-      "additionalProperties": false,
-      "properties": {
-        "instr": { "type": "integer" },
-        "elems": { "type": "integer" },
-        "avg_vl": { "type": "number" }
-      }
-    },
-
-    "countTriple": {
-      "type": "object",
-      "description": "total = fp + int.",
-      "required": ["instr", "elems", "fp", "int"],
-      "additionalProperties": false,
-      "properties": {
-        "instr": { "type": "integer", "minimum": 0 },
-        "elems": { "type": "integer", "minimum": 0 },
-        "fp": { "type": "integer", "minimum": 0 },
-        "int": { "type": "integer", "minimum": 0 }
-      }
-    },
-
-    "arith": {
-      "type": "object",
-      "description": "Aritmetica vectorial. Dos ejes solapados: forma (narrowing + widening + normal = instr) y funcion (permutations, mask, reductions, computation y scalar_deps son SUBCONJUNTOS de instr; no los sumes con la forma).",
-      "required": [
-        "instr",
-        "elems",
-        "avg_vl",
-        "fp",
-        "int",
-        "narrowing",
-        "widening",
-        "widening_reductions",
-        "widening_fused",
-        "normal",
-        "permutations",
-        "mask",
-        "reductions",
-        "computation",
-        "scalar_deps"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "instr": { "type": "integer", "minimum": 0 },
-        "elems": { "type": "integer", "minimum": 0 },
-        "avg_vl": { "type": "number", "minimum": 0 },
-        "fp": { "type": "integer", "minimum": 0 },
-        "int": { "type": "integer", "minimum": 0 },
-        "narrowing": { "type": "integer", "minimum": 0 },
-        "widening": { "type": "integer", "minimum": 0 },
-        "widening_reductions": { "$ref": "#/$defs/fpIntPair" },
-        "widening_fused": { "type": "integer", "minimum": 0 },
-        "normal": { "type": "integer", "minimum": 0 },
-        "permutations": { "$ref": "#/$defs/permutations" },
-        "mask": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Valor duplicado con sew[s].mask.instr (mismo contador interno, vmask_instr)."
-        },
-        "reductions": { "$ref": "#/$defs/fpIntPair" },
-        "computation": {
+        "elems_by_kind": {
           "type": "object",
-          "required": ["total", "fused"],
+          "description": "Elementos procesados por tipo de operacion. NO se deduce del arbol (que cuenta instrucciones, no elementos) y los tipos se SOLAPAN: una instruccion de mascara suma a la vez en arith y en mask, asi que la suma de los cuatro puede superar elems. Cada uno por separado nunca pasa de elems.",
+          "required": ["arith", "memory", "reduction", "mask"],
           "additionalProperties": false,
           "properties": {
-            "total": { "type": "integer", "minimum": 0 },
-            "fused": { "type": "integer", "minimum": 0 }
+            "arith": { "type": "integer", "minimum": 0 },
+            "memory": { "type": "integer", "minimum": 0 },
+            "reduction": { "type": "integer", "minimum": 0 },
+            "mask": { "type": "integer", "minimum": 0 }
           }
         },
-        "scalar_deps": {
-          "type": "object",
-          "required": ["total", "read_from_scalar", "write_to_scalar"],
-          "additionalProperties": false,
-          "properties": {
-            "total": { "type": "integer", "minimum": 0 },
-            "read_from_scalar": { "type": "integer", "minimum": 0 },
-            "write_to_scalar": { "type": "integer", "minimum": 0 }
-          }
-        }
-      }
-    },
-
-    "fpIntPair": {
-      "type": "object",
-      "description": "total = fp + int.",
-      "required": ["total", "fp", "int"],
-      "additionalProperties": false,
-      "properties": {
-        "total": { "type": "integer", "minimum": 0 },
-        "fp": { "type": "integer", "minimum": 0 },
-        "int": { "type": "integer", "minimum": 0 }
-      }
-    },
-
-    "permutations": {
-      "type": "object",
-      "required": ["total", "moves", "slides", "gather", "compress"],
-      "additionalProperties": false,
-      "properties": {
-        "total": { "type": "integer", "minimum": 0 },
-        "moves": {
-          "type": "object",
-          "required": ["total", "read_from_scalar", "write_to_scalar", "whole_register", "others"],
-          "additionalProperties": false,
-          "properties": {
-            "total": { "type": "integer", "minimum": 0 },
-            "read_from_scalar": { "type": "integer", "minimum": 0 },
-            "write_to_scalar": { "type": "integer", "minimum": 0 },
-            "whole_register": { "type": "integer", "minimum": 0 },
-            "others": { "type": "integer", "minimum": 0 }
-          }
-        },
-        "slides": { "type": "integer", "minimum": 0 },
-        "gather": { "type": "integer", "minimum": 0 },
-        "compress": { "type": "integer", "minimum": 0 }
-      }
-    },
-
-    "memory": {
-      "type": "object",
-      "description": "Accesos a memoria. instr = unit + strided + indexed + whole_register (categorias excluyentes); segmented_unit/segmented_strided/segmented_indexed son SUBCONJUNTOS de su categoria (solo con traza extendida); indexed = indexed_ordered + indexed_unordered.",
-      "required": [
-        "instr",
-        "elems",
-        "avg_vl",
-        "unit",
-        "segmented_unit",
-        "strided",
-        "avg_stride_b",
-        "stddev_stride_b",
-        "segmented_strided",
-        "indexed",
-        "segmented_indexed",
-        "whole_register"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "instr": { "type": "integer", "minimum": 0 },
-        "elems": { "type": "integer", "minimum": 0 },
-        "avg_vl": { "type": "number", "minimum": 0 },
-        "unit": { "type": "integer", "minimum": 0 },
-        "segmented_unit": { "type": "integer", "minimum": 0 },
-        "strided": { "type": "integer", "minimum": 0 },
         "avg_stride_b": {
           "type": "number",
-          "description": "Stride medio en BYTES; 0 si no hay accesos strided."
+          "minimum": 0,
+          "description": "Stride medio en BYTES de los accesos strided; 0 si no hubo ninguno."
         },
         "stddev_stride_b": {
           "type": "number",
           "minimum": 0,
-          "description": "Desviacion tipica del stride en BYTES; 0 si no hay accesos strided."
-        },
-        "segmented_strided": { "type": "integer", "minimum": 0 },
-        "indexed": { "type": "integer", "minimum": 0 },
-        "indexed_ordered": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Subconjunto de indexed (vle.v/vse.v indexado ordered). Añadido el 2026-10-12: los ficheros generados antes de esa fecha no lo traen (leelo como 0)."
-        },
-        "indexed_unordered": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Subconjunto de indexed (indexed unordered). Añadido el 2026-10-12: los ficheros generados antes de esa fecha no lo traen (leelo como 0)."
-        },
-        "segmented_indexed": { "type": "integer", "minimum": 0 },
-        "whole_register": { "type": "integer", "minimum": 0 }
+          "description": "Desviacion tipica del stride en BYTES; 0 si no hubo accesos strided."
+        }
+      }
+    },
+
+    "instructionsTree": {
+      "type": "object",
+      "description": "Contadores por instruccion de la region, con los mismos niveles que docs/rvv instr.md: una clave por seccion del listado (configuration_setting, vector_loads_and_stores...) y, dentro, las subcategorias y los contadores \"<mnemonico>_counter\". Solo se emiten las ramas con cuenta > 0; si la region no ejecuto instrucciones vectoriales (ni vset*), queda un objeto vacio.",
+      "propertyNames": { "pattern": "^[a-z0-9_]+$" },
+      "additionalProperties": { "$ref": "#/$defs/category" }
+    },
+
+    "category": {
+      "type": "object",
+      "description": "Nodo del listado de docs/rvv instr.md. Cada clave es o bien un contador por instruccion (\"<mnemonico>_counter\", entero >= 0) o bien una subcategoria (otro objeto de este mismo tipo). Solo se emiten las ramas con cuenta > 0, asi que nunca aparece un objeto vacio; las claves posibles las fija utils/gen_instr_counters.py a partir del listado.",
+      "propertyNames": { "pattern": "^[a-z0-9_]+(_counter)?$" },
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "integer", "minimum": 0 },
+          { "$ref": "#/$defs/category" }
+        ]
       }
     }
   }

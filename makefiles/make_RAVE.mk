@@ -39,6 +39,7 @@ RAVE_DIR=rave_sources
 ISA_OBJ= \
 callbacks.o \
 counters.o \
+instr_counters.o \
 instr_data.o 
 
 ifeq ($(RVV),0_7_1) 
@@ -65,6 +66,13 @@ SIM=qemu
 
 OBJ:=$(addprefix $(OBJDIR)/common/, $(COMMON_OBJ)) $(addprefix $(OBJDIR)/$(SIM)/, $(QEMU_OBJ)) $(addprefix $(OBJDIR)/$(ISA_FOLDER)/, $(ISA_OBJ)) 
 
+# Todas las cabeceras del proyecto son dependencia de todos los objetos: sin
+# esto make no recompila los .o que incluyen una cabecera modificada y se
+# mezclan objetos compilados con versiones distintas de un mismo struct
+# (p. ej. rave_counters), lo que corrompe la memoria en ejecucion.
+RAVE_HEADERS=$(shell find $(RAVE_DIR)/include -name '*.h')
+$(OBJ): $(RAVE_HEADERS)
+
 ELFUTILS_DIR=./build/elfutils
 IFLAGS=-I$(RAVE_DIR)/include/common -I$(RAVE_DIR)/include/rvv -I$(RAVE_DIR)/include/$(SIM) -I$(QEMU_DIR)/include/qemu -I$(ELFUTILS_DIR)/include
 
@@ -86,7 +94,7 @@ $(LIBDIR): ;
 	mkdir -p $@
 
 $(OBJDIR)/%.o: $(RAVE_DIR)/src/%.c | $(OBJDIR)/common $(OBJDIR)/$(ISA_FOLDER) $(OBJDIR)/$(SIM)
-	$(CC) $^ $(CFLAGS) $(IFLAGS) -c -o $@
+	$(CC) $< $(CFLAGS) $(IFLAGS) -c -o $@
 
 $(LIBDIR)/librave.so: $(OBJ) | $(LIBDIR)
 	$(CC) $^ -shared -fPIC -o $@ $(LDFLAGS)

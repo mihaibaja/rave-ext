@@ -122,6 +122,7 @@ struct instr_data{
 
 	uint32_t paraver_code;
 	char * asm_string;
+	short vinstr_idx;  // Indice del contador propio de la instruccion (rave_vinstr_id), -1 si no aplica
 	short src1;
 	short src2;
 	short src3;

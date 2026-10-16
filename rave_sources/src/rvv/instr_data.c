@@ -455,12 +455,16 @@ instr_data * fill_instr_struct(uint64_t pc, char * instr, uint32_t insn_opcode, 
 	data -> src2_d = (field_idx > 3) ? reg2id(instr_fields[3]) : 0;
 	data -> src3_d = -1;
 
+	data -> vinstr_idx = -1;   // Solo las instrucciones vectoriales tienen contador propio
+
 	if (contains_string(instr_fields[0], "vset")){
 		data -> type = T_VSETVL;
+		data -> vinstr_idx = rave_vinstr_lookup(instr_fields[0]);
 		if (prv_print) data -> paraver_code = instr2prv(insn_opcode);
 	}else if (instr_fields[0][0]=='v'){
 		data -> type = instr_set_vector_type(insn_opcode);
         data -> type_ext = instr_set_vector_type_ext(insn_opcode, instr_fields[0], data -> type);
+		data -> vinstr_idx = rave_vinstr_lookup(instr_fields[0]);
 
 		if (is_subtype(data->type, T_STORE)){
 			//change it back to "memory" (general)

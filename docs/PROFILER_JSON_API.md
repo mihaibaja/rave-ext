@@ -36,9 +36,14 @@ Cada `<region>`:
   "thread": 0,             int    hilo que abrió la región
   "executions": 1,         int    veces que se ejecutó
   "parent": null | "nombre_region_padre",
-  "counters": { <counters> }
+  "counters": { <counters> },
+  "instructions": { <categoría>: { <categoría> }, ... }   ver 1.4.1
 }
 ```
+
+`counters` son las **estadísticas** (y dentro, `instructions_previous_version`,
+que es el bloque de recuentos de siempre); `instructions` son los **contadores
+por instrucción**, con los mismos niveles que `docs/rvv instr.md`.
 
 Los binarios que no abren regiones explícitas producen **una sola región**:
 `name = "GLOBAL_REGION"`, `nesting = 0`, `parent = null`.
@@ -78,12 +83,18 @@ counters
 ├── flops            { total, scalar, vector }              FLOPs
 ├── global_stats     (ver 1.2)
 ├── dependencies     (ver 1.3)
-└── instructions
+└── instructions_previous_version
     ├── total, scalar, vsetvl, vector                       instrucciones
     └── sew: [ <bloque_sew> x4 ]   índice 0..3 = SEW 8, 16, 32, 64
 ```
 
-`instructions.total = scalar + vsetvl + vector` y `vector = Σ sew[i].instr`.
+`instructions_previous_version.total = scalar + vsetvl + vector` y
+`vector = Σ sew[i].instr`.
+
+Aquí sólo hay **estadísticas y dependencias**; el nombre del bloque de
+instrucciones es el de la versión anterior del contrato. Los contadores por
+instrucción están en `region.instructions`, con los niveles del listado (ver
+**§1.4.1**).
 
 ### 1.2 `global_stats`
 
@@ -124,83 +135,119 @@ fechas distintas (medido en `axpy`: `scalar.raw` pasa de `0` a `8192`).
 ```
 sew_block
 ├── sew            8|16|32|64
-├── instr, elems, avg_vl
-├── arith          { instr, elems, avg_vl, fp, int,
-│                    narrowing, widening,
-│                    widening_reductions { total, fp, int }, widening_fused, normal,
-│                    permutations { total,
-│                                   moves { total, read_from_scalar, write_to_scalar,
-│                                           whole_register, others },
-│                                   slides, gather, compress },
-│                    mask, reductions { total, fp, int },
-│                    computation { total, fused },
-│                    scalar_deps { total, read_from_scalar, write_to_scalar } }
-├── memory         { instr, elems, avg_vl, unit, segmented_unit,
-│                    strided, avg_stride_b, stddev_stride_b,
-│                    segmented_strided, indexed, indexed_ordered, indexed_unordered,
-│                    segmented_indexed, whole_register }
-├── reduction      { instr, elems, fp, int }
-├── mask           { instr, elems, avg_vl }
-└── other          { instr, elems, avg_vl }
+├── instr          instrucciones vectoriales ejecutadas con ese SEW
+├── elems          elementos procesados por esas instrucciones
+├── avg_vl         elems / instr   (0 si instr = 0)
+├── elems_by_kind  { arith, memory, reduction, mask }   elementos por tipo
+├── avg_stride_b       stride medio (bytes) de los accesos strided
+└── stddev_stride_b    desviación típica de ese stride
 ```
 
-Descomposiciones (verificadas con `utils/profiler_json_reader.py --check` sobre los
-25 JSON de `resultados/`):
+Son **estadísticas por SEW**: hasta el 2026-10-16 cada bloque llevaba además los
+desgloses `arith` / `memory` / `reduction` / `mask` / `other`, que se han
+eliminado porque se solapaban entre sí y con las categorías (§1.5). El detalle de
+*qué instrucciones* se han ejecutado está en el **árbol de categorías** de la
+región (§1.4.1), que sí es una partición.
 
-* `arith.instr  = fp + int`                                    ← exacto
-* `arith.instr  = narrowing + widening + normal`               ← exacto
-* `memory.instr = unit + strided + indexed + whole_register`   ← exacto (excluyentes)
-* `memory.indexed = indexed_ordered + indexed_unordered`       ← exacto (todo `vle.v`/`vse.v`
-  indexado es ordered u unordered, nunca ambos)
-* `other.instr  = instr − memory.instr − arith.instr − reduction.instr − mask.instr`
-  → **es un residuo, no una categoría**, y **puede salir negativo** (ver 1.5)
+Dos cosas **no** se pueden deducir del árbol (cuenta instrucciones, no elementos) y
+por eso siguen aquí:
 
-`indexed_ordered` / `indexed_unordered` son **subconjuntos** de `indexed`, igual que
-`segmented_*` lo es de su categoría. `memory.avg_stride_b` / `stddev_stride_b` están
-en **bytes**; si no hay accesos strided valen `0`.
+* `elems_by_kind`: elementos procesados por tipo de operación. Los tipos **se
+  solapan** —una instrucción de máscara suma a la vez en `arith` y en `mask`—, así
+  que la suma de los cuatro puede superar `elems`; cada uno por separado nunca
+  pasa de `elems`.
+* `avg_stride_b` / `stddev_stride_b`: medias internas de los accesos strided
+  (`0` si no hubo ninguno).
 
-Todo está en `0` cuando `trace_extended` es `false`, **salvo**: `sew`, `instr`,
-`elems`, `arith.instr/elems/fp/int`, `reduction.*`, `memory.*` (excepto
-`segmented_*`, `indexed_ordered`, `indexed_unordered` y `stddev_stride_b`),
-`mask.*` y `other.*`, que se calculan siempre.
+Los siete campos se calculan siempre, con o sin `trace_extended`.
 
-`indexed_ordered` / `indexed_unordered` se añadieron el 2026-10-12: en ficheros
-generados antes de esa fecha **no aparecen** (léelos como `0`, que es lo que hace
-`../profiler/` con cualquier campo ausente).
+Estos cuatro campos se calculan siempre, con o sin `trace_extended`.
 
-También desde el 2026-10-12 el decodificador marca las **reducciones** con su bit
-FP/INT: `vredsum`/`vredmax`… (enteras) y `vfredsum`/`vfredosum` (FP) dejan de
-contarse dentro de `computation` y pasan a `reduction.*` / `arith.reductions.*`,
-con `reduction.int` y `reduction.fp` poblados (antes `reduction.int` era siempre
-`0`). Consecuencia: en un benchmark con reducciones, `other.instr` puede bajar y
-`computation.total` también; no compares esos campos entre fechas.
+### 1.4.1 Contadores por instrucción (niveles del listado)
 
-### 1.5 Categorías solapadas y valores duplicados (importante)
+Desde el 2026-10-16 cada región lleva en `instructions` los contadores por
+instrucción, agrupados con los mismos niveles que el listado
+`docs/rvv instr.md`:
 
-`arith` cubre dos ejes a la vez y **no son disjuntos**:
+```json
+{
+  "id": 0,
+  "name": "GLOBAL_REGION",
+  "counters": { "...": "estadísticas y dependencias (1.1) + instructions_previous_version (1.4)" },
+  "instructions": {
+    "configuration_setting": { "vsetvli_counter": 5 },
+    "vector_loads_and_stores": {
+      "unit_stride": { "vle32_v_counter": 3, "vse32_v_counter": 3 }
+    },
+    "vector_integer_arithmetic": {
+      "single_width_add_subtract": { "vadd_vx_counter": 1 }
+    },
+    "vector_floating_point": {
+      "compare": { "vmfgt_vf_counter": 1 }
+    }
+  }
+}
+```
 
-* Eje "forma" (suman exactamente `arith.instr`): `narrowing`, `widening`, `normal`.
-* Eje "función" (**subconjuntos** de `arith.instr`; no los sumes con el anterior):
-  `permutations`, `mask`, `reductions`, `computation`, `scalar_deps`.
+* **Clave de contador** = nombre del contador = la instrucción con todo lo que no
+  sea `[a-zA-Z0-9_]` sustituido por `_` y el sufijo `_counter`:
+  `vadd.vv` → `vadd_vv_counter`, `vfmv.f.s` → `vfmv_f_s_counter`,
+  `vl1r.v` → `vl1r_v_counter`.
+* **Clave de categoría** = el título del listado en `snake_case`
+  (`vector_loads_and_stores`, `unit_stride`,
+  `single_width_fused_multiply_add`, `alias_and_pseudo_instructions`…). El
+  conjunto completo de claves posibles (630 contadores en 80 categorías) lo fija
+  `utils/gen_instr_counters.py` a partir del listado; su versión para C es
+  `rave_sources/include/rvv/instr_counters.h`.
+* **Valor** = instrucciones de esa forma ejecutadas en la región, sumadas sobre
+  los cuatro SEW.
+* **Sólo se emiten las ramas con cuenta > 0**: un JSON normal trae unas pocas
+  decenas de claves, no 630. Una clave ausente es `0`.
+* Cada instrucción cuelga de **una sola** rama: no hay categorías solapadas, así
+  que se puede sumar cualquier nivel sin duplicar nada (§1.5).
+* Los **`vset*`** (`vsetvli`, `vsetivli`, `vsetvl`) van en
+  `configuration_setting` aunque no tengan SEW: por eso el árbol está a nivel de
+  región y no dentro de cada `<bloque_sew>`. Si la región no ejecutó ninguna
+  instrucción vectorial (ni `vset*`), `instructions` queda como objeto vacío.
+* Estos contadores **no dependen de `trace_extended`**: se rellenan siempre.
+* Los contadores **agregados** que existían antes (`vunit_instr`, `vstride_instr`,
+  `vidx_instr`, `vspill_instr`, `vint_instr`, `vfp_instr`, `vseg_instr_*`,
+  `vmove_instr`, `vmask_instr`, `vsetvl_instr`…) **ya no se emiten**: se
+  recalculan sumando las categorías (p. ej. la memoria unit-stride es
+  `Σ vector_loads_and_stores.unit_stride` y las máscaras `Σ vector_mask.*`).
+* `utils/profiler_json_reader.py` aplana el árbol con `instruction_counters()` y
+  suma por sección con `category_totals()` (`--summary` muestra esos totales y el
+  *top 5*; `--dump` el árbol completo).
 
-Además hay **valores duplicados** en dos sitios del mismo JSON (mismo contador interno):
+### 1.5 Sumas que se pueden hacer (y cuáles no)
 
-| Campo A | Campo B | Contador interno |
-|---|---|---|
-| `sew[s].mask.instr` | `sew[s].arith.mask` | `vmask_instr` |
-| `sew[s].reduction.*` | `sew[s].arith.widening_reductions.*` | `vfp_reductions + vint_reductions` |
+El árbol de `region.instructions` (§1.4.1) **es una partición**: cada instrucción
+ejecutada está en una única rama. Por eso cualquier suma cuenta exactamente lo que
+cuelga de ahí, sin duplicados:
 
-**Consecuencia: `other.instr` puede ser negativo.** Las instrucciones de máscara y
-las reducciones se cuentan *dentro* de `arith` (una `vmadc` incrementa `vint_instr`
-**y** `vmask_instr`) y después se restan otra vez en la fórmula de `other`. Medido en
-`particlefilter_vector` (SEW 64): `instr=73939`, `memory=180`, `arith=73759`,
-`mask=17088` → `other = 73939 − 180 − 73759 − 0 − 17088 = −17088`. No interpretes
-`other` como "instrucciones sin clasificar"; si lo necesitas, calcula el residuo
-excluyendo `mask` y `reduction`.
+| Quiero… | Fórmula |
+|---|---|
+| todas las instrucciones contadas | `Σ region.instructions = prev.total − prev.scalar` |
+| las vectoriales | `prev.vector = Σ prev.sew[].instr` |
+| las de carga/almacenamiento | `Σ instructions.vector_loads_and_stores.*` |
+| las unit-stride | `instructions.vector_loads_and_stores.unit_stride` |
+| las segmentadas | `Σ instructions.vector_loads_and_stores.segment.*` |
+| las máscaras | `Σ instructions.vector_mask.*` |
+| las instrucciones `vset*` | `prev.vsetvl` |
 
-Ejemplo sin solape (axpy, SEW 64): `instr = 2048`, `normal = 2048`,
-`computation.total = 2048` (toda la aritmética es fused/FMA),
-`scalar_deps.read_from_scalar = 2048`.
+(donde `prev` = `counters.instructions_previous_version`).
+
+Lo que **no** tiene sentido es sumar entre sí los bloques de `counters`
+(`moved_bytes`, `flops`, `global_stats`, `dependencies`): son magnitudes distintas
+(bytes, FLOPs, medias y riesgos), no recuentos de instrucciones.
+
+Las únicas desviaciones posibles son de redondeo con `accumulate_regions` (cada
+contador es una media redondeada por separado, ver §2.7).
+
+Hasta el 2026-10-16 sí había solapes: `arith` cubría dos ejes a la vez (forma y
+función), `sew[s].mask.instr` duplicaba `sew[s].arith.mask`, y `other` era un
+residuo que podía salir **negativo** (medido en `particlefilter_vector`:
+`other = −17088`). Todo eso desaparece al pasar a las categorías del listado.
 
 ---
 
@@ -222,7 +269,7 @@ Ejemplo sin solape (axpy, SEW 64): `instr = 2048`, `normal = 2048`,
    con `region_count` **menor** que `len(regions)`.
 7. **Con `accumulate_regions` las descomposiciones pueden desviarse ±0,5 por sumando**:
    cada contador es una media por ejecución redondeada a entero de forma
-   independiente. Medido en `large/lavaMD.json`: `instructions.vector = 158054`
+   independiente. Medido en `large/lavaMD.json`: `instructions_previous_version.vector = 158054`
    frente a la suma de `sew[].instr = 158055`. No es un fichero corrupto; compara
    con tolerancia (el visor `profiler/` usa 0,5 por sumando) o usa JSONs sin
    acumulación para validar igualdades exactas.
@@ -237,6 +284,9 @@ import json
 d = json.load(open("spmv_vector.json"))
 print(d["generator"], d["binary"], d["vlen_bits"], d["region_count"])
 
+def total(node):                      # suma un subárbol de categorías
+    return sum(total(v) if isinstance(v, dict) else v for v in node.values())
+
 for reg in d["regions"]:
     c = reg["counters"]
     g = c["global_stats"]
@@ -244,10 +294,17 @@ for reg in d["regions"]:
           f'vec_instr={c["instructions"]["vector"]}, '
           f'avgVL={g["avg_vl_elems"]:.2f}, ocupación={g["avg_occupancy"]*100:.2f}%')
 
-    for s in c["instructions"]["sew"]:
+    for s in c["instructions_previous_version"]["sew"]:
         if s["instr"]:
             print(f'  SEW{s["sew"]}: instr={s["instr"]} elems={s["elems"]} '
-                  f'avg_vl={s["avg_vl"]:.2f} deps={s["arith"]["scalar_deps"]["total"]}')
+                  f'avg_vl={s["avg_vl"]:.2f}')
+
+    # contadores por instrucción: total por sección del listado
+    for name, node in reg["instructions"].items():
+        print(f'  {name}: {total(node)}')
+
+    # qué instrucciones concretas se han ejecutado
+    print("  ", reg["instructions"].get("configuration_setting", {}))
 ```
 
 Con `jq`:
@@ -255,14 +312,26 @@ Con `jq`:
 ```bash
 # resumen por región
 jq -r '.regions[] | [.name, .counters.moved_bytes.total,
-                      .counters.instructions.vector,
+                      .counters.instructions_previous_version.vector,
                       .counters.global_stats.avg_occupancy] | @tsv' f.json
 
 # solo los SEW usados
-jq '.regions[0].counters.instructions.sew[] | select(.instr>0) | {sew, instr, avg_vl}' f.json
+jq '.regions[0].counters.instructions_previous_version.sew[] | select(.instr>0)
+    | {sew, instr, avg_vl}' f.json
 
 # comprobar que las dependencias están activas
 jq '.regions[0].counters.dependencies.vector' f.json
+
+# contadores por instrucción: un nivel del listado, o todo el árbol aplanado
+jq '.regions[0].instructions.vector_loads_and_stores' f.json
+jq '.regions[0].instructions | paths(scalars) | map(tostring) | join(".")' f.json
+```
+
+El lector de referencia ya trae esto hecho:
+
+```bash
+python3 utils/profiler_json_reader.py f.json --summary   # totales por sección y top 5
+python3 utils/profiler_json_reader.py f.json --dump      # el árbol completo
 ```
 
 ---
@@ -284,13 +353,14 @@ jq '.regions[0].counters.dependencies.vector' f.json
   python3 utils/profiler_json_reader.py salida.json --validate
   # resumen por región y SEW
   python3 utils/profiler_json_reader.py salida.json --summary
-  # solo invariantes (descomposiciones, orden de sew[], campos extendidos)
+  # solo invariantes (descomposiciones y orden de sew[])
   python3 utils/profiler_json_reader.py salida.json --check
   ```
 
-  Comprueba, entre otras cosas, que `indexed = indexed_ordered + indexed_unordered`,
-  que `memory.instr = unit + strided + indexed + whole_register` y que los campos
-  extendidos están a cero cuando `trace_extended` es `false`.
+  Comprueba, entre otras cosas, que `total = scalar + vsetvl + vector`, que
+  `vector = Σ sew[].instr` y que la suma del árbol de contadores por instrucción
+  es `total − scalar` (error si se pasa, aviso si se queda corta porque haya
+  mnemónicos que la tabla aún no conoce).
 * Pruebas del esquema y del validador: `test/profiler_json/`.
 
 ---
@@ -302,6 +372,7 @@ escritor JSON tiene que reflejarse aquí (y en `schema/profiler_json_schema_v1.j
 
 | Fecha | Cambio en RAVE | Efecto en el contrato |
 |---|---|---|
+| 2026-10-16 | `instr_counters.c` (nuevo) + `instr_data.c` + `callbacks.c`: contador propio por cada instrucción vectorial (630), con `_counter` en el nombre; `gen_instr_counters.py` los agrupa con los niveles de `docs/rvv instr.md` | **Rediseño del contrato (v2)**: los contadores por instrucción pasan a `region.instructions`, con las categorías del listado (§1.4.1), que forman una partición. El bloque de recuentos anterior se conserva en `counters.instructions_previous_version` (§1.1); desaparecen sus desgloses por SEW `arith`/`memory`/`reduction`/`mask`/`other` y los contadores agregados (`vunit_instr`, `vint_instr`…), que se recalculan sumando categorías (§1.5). El bloque SEW se queda con las estadísticas y con lo que **no** se deduce del árbol: `elems_by_kind` y `avg_stride_b`/`stddev_stride_b` (§1.4) |
 | 2026-10-12 | `inst_trace.c`: nueva traza dinámica por instrucción (JSONL, otro fichero) | Ninguno: este contrato son los contadores agregados por región |
 | 2026-10-12 | `instr_data.c`: las reducciones se marcan con su bit FP/INT | `reduction.int` deja de ser siempre `0`; las reducciones salen de `computation` (§1.4) |
 | 2026-10-12 | `callbacks.c`: los riesgos se separan por registro escalar/vectorial | `dependencies.scalar.*` deja de ser siempre `0` (§1.3) |

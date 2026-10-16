@@ -9,6 +9,8 @@
 
 #include <stdio.h>
 
+#include "instr_counters.h"
+
 #define NUM_VECTOR_REGS 32
 
 #define PERCENTAGE(fd,x,y,fin)\
@@ -23,6 +25,10 @@ struct rave_counters{
 				double vsetvl_instr;
 				double vector_instr[SEWS];
 				double velem[SEWS];
+
+				/* Contador propio de cada instruccion vectorial: una entrada
+				 * por forma de encoding, indexada por rave_vinstr_id. */
+				double vinstr[RAVE_VINSTR_COUNT][SEWS];
 
 				//Memory
 				double velem_mem[SEWS];
@@ -111,3 +117,7 @@ void print_counters_human(FILE * fd, rave_counters * counters);
 void print_csv_header(FILE * fd);
 void print_counters_csv(FILE * fd, rave_counters * counters);
 void print_counters_json(FILE * fd, rave_counters * counters);
+
+/* Contadores por instruccion agrupados como en "docs/rvv instr.md": cuelga sus
+ * categorias directamente de la region (una clave por nivel del listado). */
+void print_instr_tree_json(FILE * fd, int * first, rave_counters * counters);

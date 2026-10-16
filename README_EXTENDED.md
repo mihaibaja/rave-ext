@@ -163,7 +163,7 @@ python3 utils/profiler_json_reader.py salida.json --summary
 python3 test/profiler_json/test_profiler_json_reader.py
 ```
 
-El JSON incluye, **por región**: bytes movidos, FLOPs, *global stats* (Average VL, LMUL, ocupación, `tu`/`ta` efectivos, registros vectoriales únicos), dependencias (RAW/WAW/WAR escalares y vectoriales con distancia media) y el mix de instrucciones por SEW (arith FP/INT, narrowing/widening con sus reducciones y fused, permutaciones/moves, máscaras, reducciones, cómputo/fused y el desglose de memoria unit/strided/indexed —con `indexed_ordered`/`indexed_unordered`—/segmentado).
+El JSON incluye, **por región**: bytes movidos, FLOPs, *global stats* (Average VL, LMUL, ocupación, `tu`/`ta` efectivos, registros vectoriales únicos), dependencias (RAW/WAW/WAR escalares y vectoriales con distancia media), las instrucciones vectoriales por SEW (bloques `sew[]`, con las estadísticas y los elementos por tipo) y, en el objeto `instructions` de cada región, el contador de cada instrucción ejecutada (`vadd_vv_counter`, `vle32_v_counter`…), agrupado con los mismos niveles que `docs/rvv instr.md` (`vector_loads_and_stores.unit_stride`, `vector_floating_point.single_width_fused_multiply_add`, …). El contrato completo está en `docs/PROFILER_JSON_API.md` (§1.4.1) y su esquema en `schema/profiler_json_schema_v1.json`.
 
 ## 4. Instrucciones no compatibles con RAVE/QEMU
 `vfwredusum.vs`
@@ -178,17 +178,17 @@ Medido con 5 ejecuciones de `axpy_vector.exe 512` (267 valores hoja):
 
 | Campo | Comportamiento |
 |---|---|
-| `counters.instructions.scalar` | varía (±~100) |
-| `counters.instructions.total` | varía (±~100); arrastra el anterior |
+| `counters.instructions_previous_version.scalar` | varía (±~100) |
+| `counters.instructions_previous_version.total` | varía (±~100); arrastra el anterior |
 | `counters.moved_bytes.scalar` | varía (±~100) |
 | `counters.moved_bytes.total` | varía (±~100); arrastra el anterior |
 
 Causa: esas magnitudes cuentan el **arranque escalar del programa** (cargador
 dinámico y procesado del entorno). Verificado: alargando `PATH` 400 caracteres,
-`instructions.scalar` cambia en ~19 y `moved_bytes.scalar` en ~20, mientras que
+`instructions_previous_version.scalar` cambia en ~19 y `moved_bytes.scalar` en ~20, mientras que
 **todos los contadores vectoriales permanecen idénticos**.
 
-**Todos los campos vectoriales son estables** (`instructions.vector`, `sew[*].*`,
+**Todos los campos vectoriales son estables** (`instructions_previous_version.vector`, `sew[*].*`,
 `global_stats.*`, `dependencies.vector.*`, `moved_bytes.vector`, `flops.vector`).
 Si necesitas determinismo estricto, usa esos; para los escalares, compara con
 tolerancia relativa (~1e-5) o ignóralos.
@@ -330,9 +330,9 @@ instrumentado:
 
 | Contador | Sin regiones | Con regiones | Diferencia |
 |---|---|---|---|
-| `instructions.total` | 87.608.090 | 88.150.597 | +542.507 (**+0,62 %**) |
-| `instructions.scalar` | 80.024.088 | 80.470.595 | +446.507 (+0,56 %) |
-| `instructions.vector` | 7.200.001 | 7.200.001 | **0 (idéntico)** |
+| `instructions_previous_version.total` | 87.608.090 | 88.150.597 | +542.507 (**+0,62 %**) |
+| `instructions_previous_version.scalar` | 80.024.088 | 80.470.595 | +446.507 (+0,56 %) |
+| `instructions_previous_version.vector` | 7.200.001 | 7.200.001 | **0 (idéntico)** |
 
 Los marcadores son instrucciones escalares (`add x0`/`sub x0`), así que **el mix
 vectorial no se altera**: son ~1,4 instrucciones por marcador y el coste es

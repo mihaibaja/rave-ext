@@ -402,6 +402,10 @@ static void json_region(FILE * fd, int id, region_t * region, rave_counters * co
 	json_str(fd, &f, "parent", region->parent != NULL ? region->parent->name : NULL);
 	json_key_only(fd, &f, "counters");
 	print_counters_json(fd, counters);
+	/* Contadores por instruccion con los niveles de "docs/rvv instr.md":
+	 * van en el objeto "instructions" de la region (las estadisticas de
+	 * siempre se quedan en counters.instructions_previous_version). */
+	print_instr_tree_json(fd, &f, counters);
 	json_pop();
 	json_indent(fd);
 	fputc('}', fd);
