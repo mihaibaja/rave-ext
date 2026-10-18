@@ -1,12 +1,28 @@
-*.tar*
+# --- Productos de compilacion y artefactos de RAVE -------------------------
+build/
+downloads/
+*.o
+*.a
+*.so
+*.d
+*.x
+*.exe
+*.out
 *.log
 *.pcf
 *.row
 *.prv
-*.x
-*.o
 *.trace
-downloads
-build
+*.dmp
+*.tar*
+*~
+compile_commands.json
+.cache/
+
+# --- Python ----------------------------------------------------------------
 __pycache__/
 *.pyc
+
+# --- Salidas locales de la validacion --------------------------------------
+rave_sources/obj/
+validation/bin/
