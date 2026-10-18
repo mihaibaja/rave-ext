@@ -14,7 +14,7 @@ Esta versión extiende **RAVE** (*RISC-V Automated Vector Emulator*) con capacid
    - [Métricas Vectoriales y Estadísticas](arquitectura/metricas-vectoriales.md): Promedios de VL, LMUL efectivo (incluyendo LMULs fraccionales), porcentaje de ocupación respecto a VLMAX, afectación de políticas `ta`/`tu` y desviación estándar de strides.
 
 2. **[Guía de Uso](guia-uso/index.md)**
-   - [Configuración del Entorno](guia-uso/configuracion-entorno.md): Uso del script [`entorno.sh`](file:///home/jabautis/Escritorio/TFG/rave-ext/entorno.sh), flags de ejecución y configuración de QEMU.
+   - [Configuración del Entorno](guia-uso/configuracion-entorno.md): Uso del script [`entorno.sh`](../entorno.sh), flags de ejecución y configuración de QEMU.
 
 ---
 
