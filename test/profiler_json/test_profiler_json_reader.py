@@ -229,6 +229,24 @@ class TestProfilerJsonInvariants(unittest.TestCase):
         errors, _ = check_invariants(doc)
         self.assertTrue(any("elems_by_kind.memory" in e for e in errors), errors)
 
+    def test_masked_metrics_are_reported(self):
+        doc = minimal()
+        counters(doc)["masked"] = {
+            "arith": {"instr": 4, "avg_density": 0.5, "stddev_density": 0.1},
+            "memory": {"instr": 2, "avg_density": 1.0, "stddev_density": 0.0},
+        }
+        self.assertEqual(validate_document(doc, load_schema()), [])
+        self.assertIn("masked arith: instr=4", "\n".join(dump(doc)))
+        self.assertIn("masked arith", "\n".join(summarize(doc)))
+
+    def test_masked_density_must_be_a_fraction(self):
+        doc = minimal()
+        counters(doc)["masked"] = {
+            "arith": {"instr": 1, "avg_density": 1.5, "stddev_density": 0},
+        }
+        self.assertTrue(any("avg_density" in e
+                            for e in validate_document(doc, load_schema())))
+
     def test_region_count_mismatch_without_accumulation(self):
         doc = minimal()
         doc["region_count"] = 3

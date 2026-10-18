@@ -434,6 +434,33 @@ void print_counters_json(FILE * fd, rave_counters * c){
 	json_obj_close(fd);
 	json_obj_close(fd);
 
+	/* Mascaras: instrucciones enmascaradas por categoria y densidad media
+	 * (fraccion de lanes activos en v0) con su desviacion tipica. Los
+	 * contadores son por SEW; aqui se agregan todos. */
+	json_obj_open(fd, &f, "masked");
+	{ int h0 = 1;
+	  for (int g = 0; g < 2; ++g){
+		/* 0 = load/store, 1 = aritmeticas (mismo orden que vmasked_instr) */
+		const char * nombre = (g == 0) ? "memory" : "arith";
+		double n = 0, disp = 0, sq = 0, media;
+		int h = 1;
+		for (int s = 0; s < SEWS; ++s){
+			n += c->vmasked_instr[g][s];
+			disp += c->vmasked_disp[g][s];
+			sq += c->vmasked_disp_squared[g][s];
+		}
+		if (n <= 0) continue;
+		media = disp / n;
+		json_obj_open(fd, &h0, nombre);
+			json_int(fd, &h, "instr", n);
+			json_num(fd, &h, "avg_density", media);
+			json_num(fd, &h, "stddev_density",
+			         sqrt(fmax(0.0, sq / n - media * media)));
+		json_obj_close(fd);
+	  }
+	}
+	json_obj_close(fd);
+
 	/* Distancias de las indexadas: para cada instruccion, media del rango
 	 * (max-min) de direcciones; en el JSON, la media de esas medias dando el
 	 * mismo peso a cada instruccion (no al numero de ejecuciones). */

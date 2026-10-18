@@ -116,7 +116,8 @@
         "dependencies": { "$ref": "#/$defs/dependencies" },
         "instructions_previous_version":
           { "$ref": "#/$defs/instructionsPreviousVersion" },
-        "memory_addresses": { "$ref": "#/$defs/memoryAddresses" }
+        "memory_addresses": { "$ref": "#/$defs/memoryAddresses" },
+        "masked": { "$ref": "#/$defs/masked" }
       }
     },
 
@@ -232,6 +233,26 @@
           "minimum": 0,
           "description": "Distancia media en instrucciones. Si count = 0 vale 0 (no es un error)."
         }
+      }
+    },
+
+    "masked": {
+      "type": "object",
+      "description": "Instrucciones enmascaradas (vm=0) por categoria: `arith` y `memory`. `instr` es el total y `avg_density` la fraccion media de lanes activos de la mascara (0..1) con su desviacion tipica. Solo se rellena con trace_extended. Opcional: los JSON anteriores al 2026-10-18 no lo traen; si no hubo enmascaradas queda vacio.",
+      "additionalProperties": false,
+      "properties": {
+        "arith": { "$ref": "#/$defs/maskDensity" },
+        "memory": { "$ref": "#/$defs/maskDensity" }
+      }
+    },
+    "maskDensity": {
+      "type": "object",
+      "required": ["instr", "avg_density", "stddev_density"],
+      "additionalProperties": false,
+      "properties": {
+        "instr": { "type": "integer", "minimum": 0 },
+        "avg_density": { "type": "number", "minimum": 0, "maximum": 1 },
+        "stddev_density": { "type": "number", "minimum": 0 }
       }
     },
 

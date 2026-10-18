@@ -377,6 +377,13 @@ def summarize(doc):
             top = sorted(counted.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
             lines.append("    top_instr: "
                          + ", ".join(f"{name}={count}" for name, count in top))
+        masked = (region.get("counters") or {}).get("masked") or {}
+        for cat in ("arith", "memory"):
+            r = masked.get(cat)
+            if isinstance(r, dict):
+                lines.append(f"    masked {cat}: {r['instr']} instr, "
+                             f"densidad {r['avg_density']:.2f} "
+                             f"± {r['stddev_density']:.2f}")
         addr = (region.get("counters") or {}).get("memory_addresses") or {}
         grupos = [f"{name}={r['avg_range_b']:.1f}B ({r['instr']} instr, "
                   f"{r['executions']} ejec.)"
@@ -410,6 +417,11 @@ def dump(doc):
                          f"| stride={block.get('avg_stride_b', 0)}"
                          f"±{block.get('stddev_stride_b', 0)}")
 
+        masked = (region.get("counters") or {}).get("masked") or {}
+        for cat, r in masked.items():
+            lines.append(f"  masked {cat}: instr={r['instr']} "
+                         f"avg_density={r['avg_density']:.2f} "
+                         f"stddev={r['stddev_density']:.2f}")
         addr = (region.get("counters") or {}).get("memory_addresses") or {}
         for name, r in addr.items():
             if isinstance(r, dict) and "avg_range_b" in r:
