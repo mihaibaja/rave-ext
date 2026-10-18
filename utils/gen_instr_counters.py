@@ -146,26 +146,38 @@ def fnv1a(text):
 
 
 def read_listing(path):
-    """Devuelve (mnemonicos, categoria de cada uno, arbol de categorias).
+    """Devuelve (mnemonicos, categoria de cada uno, arbol, indice de indexed).
 
     El arbol es una lista de (clave, indice del padre) en orden de aparicion;
     las categorias de nivel superior llevan padre -1, de forma que los padres
-    siempre van antes que sus hijos. Cada instruccion cuelga de la categoria
-    mas profunda abierta cuando aparece su fila.
+    siempre van antes que sus hijos.
+
+    Las instrucciones indexadas (las de "Vector Indexed Instructions" y las de
+    "Vector Indexed Segment Loads and Stores") cuelgan todas de la categoria
+    `indexed`: el emisor del JSON las suma por prefijo del mnemonico en dos
+    claves, `load` (`vl*`) y `store` (`vs*`), sin tablas auxiliares. La
+    categoria `indexed_segment` se crea pero se queda sin contadores, asi que
+    el emisor no la imprime (solo saca categorias con total > 0).
     """
     mnemonics, instr_cat, categories = [], [], []
     stack = []                       # (nivel del titulo, indice en categories)
+    seen_titles = []
+    idx_indexed = None
+
     for line in path.read_text(encoding="utf-8").splitlines():
         heading = re.match(r"^(#+) (.+?)\s*$", line)
         if heading:
             level, title = len(heading.group(1)), heading.group(2)
             if title not in CATEGORY_KEYS:
                 sys.exit(f"ERROR: el titulo {title!r} no esta en CATEGORY_KEYS")
+            seen_titles.append(title)
             while stack and stack[-1][0] >= level:
                 stack.pop()
             parent = stack[-1][1] if stack else -1
             categories.append((CATEGORY_KEYS[title], parent))
             stack.append((level, len(categories) - 1))
+            if CATEGORY_KEYS[title] == "indexed":
+                idx_indexed = len(categories) - 1
             continue
         row = re.match(r"^\|[☑☒☐]\|`([^`]+)`\|", line)
         if not row:
@@ -176,12 +188,29 @@ def read_listing(path):
             sys.exit(f"ERROR: la fila de {mnemonic} no lleva su <mnemonico>_counter")
         if not stack:
             sys.exit(f"ERROR: {mnemonic} no esta bajo ningun titulo")
+
+        abiertas = {categories[idx][0] for _, idx in stack}
+        if "indexed" in abiertas or "indexed_segment" in abiertas:
+            if idx_indexed is None:
+                sys.exit("ERROR: fila indexada antes de la seccion 'indexed'")
+            if not (mnemonic.startswith("vl") or mnemonic.startswith("vs")):
+                sys.exit(f"ERROR: no se si {mnemonic} es load o store")
+            # cuelga de `indexed`: el emisor lo suma en load o store
+            mnemonics.append(mnemonic)
+            instr_cat.append(idx_indexed)
+            continue
+
         mnemonics.append(mnemonic)
         instr_cat.append(stack[-1][1])
 
     if len(mnemonics) != len(set(mnemonics)):
         sys.exit("ERROR: hay mnemonicos repetidos en el listado")
-    keys = [key for key, _ in categories]
+    if len(seen_titles) != len(set(seen_titles)):
+        sys.exit("ERROR: hay titulos repetidos en el listado")
+    if set(seen_titles) != set(CATEGORY_KEYS):
+        sys.exit("ERROR: CATEGORY_KEYS y el listado no coinciden: faltan "
+                 f"{sorted(set(CATEGORY_KEYS) - set(seen_titles))}, sobran "
+                 f"{sorted(set(seen_titles) - set(CATEGORY_KEYS))}")
     # Las claves solo tienen que ser unicas entre hermanas: cada categoria se
     # anida dentro de su padre en el JSON, asi que `integer_compare` puede
     # existir a la vez en enteras y en las pseudo-instrucciones de comparacion.
@@ -191,10 +220,8 @@ def read_listing(path):
         if key in seen:
             sys.exit(f"ERROR: clave de categoria repetida en el mismo nivel: {key}")
         seen.add(key)
-    if len(keys) != len(CATEGORY_KEYS):
-        sys.exit(f"ERROR: CATEGORY_KEYS tiene {len(CATEGORY_KEYS)} titulos y el "
-                 f"listado {len(keys)}: sobra o falta alguno")
-    return mnemonics, instr_cat, categories
+    return (mnemonics, instr_cat, categories,
+            idx_indexed if idx_indexed is not None else -1)
 
 
 def build_hash(mnemonics):
@@ -216,7 +243,7 @@ def header_banner():
             "/*********************************************************/\n")
 
 
-def write_header(mnemonics, categories):
+def write_header(mnemonics, categories, idx_indexed):
     ids = [c_id(m) for m in mnemonics]
     with open(HDR, "w", encoding="utf-8") as f:
         f.write(header_banner())
@@ -238,6 +265,9 @@ def write_header(mnemonics, categories):
         f.write(" * Cada nodo es (clave en el JSON, indice del padre); -1 = nivel superior. */\n")
         f.write("typedef struct { const char *name; short parent; } rave_vinstr_category;\n")
         f.write("extern const rave_vinstr_category rave_vinstr_categories[RAVE_VINSTR_NCAT];\n\n")
+        f.write("/* Indice de la categoria `indexed`: sus contadores se suman en el\n")
+        f.write(" * JSON en dos claves, load (mnemonicos vl*) y store (vs*). */\n")
+        f.write(f"#define RAVE_VINSTR_CAT_INDEXED {idx_indexed}\n\n")
         f.write('/* Indice de la instruccion a partir de su mnemonico ("vadd.vv"),\n')
         f.write(" * o -1 si no es una instruccion vectorial conocida. */\n")
         f.write("int rave_vinstr_lookup(const char *mnemonic);\n\n")
@@ -309,8 +339,8 @@ def main():
     md = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_MD
     if not md.is_file():
         sys.exit(f"ERROR: no encuentro el listado de instrucciones: {md}")
-    mnemonics, instr_cat, categories = read_listing(md)
-    write_header(mnemonics, categories)
+    mnemonics, instr_cat, categories, idx_indexed = read_listing(md)
+    write_header(mnemonics, categories, idx_indexed)
     write_source(mnemonics, instr_cat, categories, build_hash(mnemonics))
     print(f"{len(mnemonics)} contadores en {len(categories)} categorias desde {md}")
     print(" ", HDR.relative_to(REPO))

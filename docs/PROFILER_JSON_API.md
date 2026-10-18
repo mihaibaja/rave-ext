@@ -83,6 +83,7 @@ counters
 ├── flops            { total, scalar, vector }              FLOPs
 ├── global_stats     (ver 1.2)
 ├── dependencies     (ver 1.3)
+├── memory_addresses (ver 1.5, solo si hubo indexadas)
 └── instructions_previous_version
     ├── total, scalar, vsetvl, vector                       instrucciones
     └── sew: [ <bloque_sew> x4 ]   índice 0..3 = SEW 8, 16, 32, 64
@@ -145,7 +146,7 @@ sew_block
 
 Son **estadísticas por SEW**: hasta el 2026-10-16 cada bloque llevaba además los
 desgloses `arith` / `memory` / `reduction` / `mask` / `other`, que se han
-eliminado porque se solapaban entre sí y con las categorías (§1.5). El detalle de
+eliminado porque se solapaban entre sí y con las categorías (§1.6). El detalle de
 *qué instrucciones* se han ejecutado está en el **árbol de categorías** de la
 región (§1.4.1), que sí es una partición.
 
@@ -204,7 +205,12 @@ instrucción, agrupados con los mismos niveles que el listado
 * **Sólo se emiten las ramas con cuenta > 0**: un JSON normal trae unas pocas
   decenas de claves, no 630. Una clave ausente es `0`.
 * Cada instrucción cuelga de **una sola** rama: no hay categorías solapadas, así
-  que se puede sumar cualquier nivel sin duplicar nada (§1.5).
+  que se puede sumar cualquier nivel sin duplicar nada (§1.6).
+* **Indexadas colapsadas**: `vluxei*`/`vloxei*` se suman en `indexed.load` y
+  `vsuxei*`/`vsoxei*` en `indexed.store`; las segmentadas indexadas
+  (`vluxseg*`, `vsoxseg`…) van a las mismas dos sumas, así que la sección
+  `indexed_segment` ya no aparece. Las distancias de esas instrucciones se
+  agregan también por grupo en `memory_addresses` (§1.5).
 * Los **`vset*`** (`vsetvli`, `vsetivli`, `vsetvl`) van en
   `configuration_setting` aunque no tengan SEW: por eso el árbol está a nivel de
   región y no dentro de cada `<bloque_sew>`. Si la región no ejecutó ninguna
@@ -219,7 +225,32 @@ instrucción, agrupados con los mismos niveles que el listado
   suma por sección con `category_totals()` (`--summary` muestra esos totales y el
   *top 5*; `--dump` el árbol completo).
 
-### 1.5 Sumas que se pueden hacer (y cuáles no)
+### 1.5 `memory_addresses` — distancias de las indexadas
+
+Sólo se perfilan las instrucciones **indexadas**. Para cada ejecución se calculan
+sus direcciones efectivas (`base (rs1) + índice × EEW`) y se toma el rango
+`max − min`. Por instrucción se acumulan esos rangos; el JSON publica **una sola
+media por grupo** (cargas y almacenamientos):
+
+```json
+"memory_addresses": {
+  "load":  { "instr": 2, "executions": 101, "avg_range_b": 140 },
+  "store": { "instr": 1, "executions": 2,   "avg_range_b": 160 }
+}
+```
+
+* `avg_range_b` es la **media de las medias de cada instrucción**, dando el mismo
+  peso a todas: primero se hace la media de cada instrucción con sus propias
+  ejecuciones y luego se promedian esas medias. **No** es la media ponderada por
+  ejecuciones.
+* `instr` = cuántas instrucciones distintas entran en la media; `executions` = sus
+  ejecuciones totales.
+* Los grupos son los mismos del árbol: `load` = mnemónicos `vl*`, `store` = `vs*`
+  (§1.4.1).
+* Es **opcional** en el esquema: no aparece si la región no ejecutó indexadas.
+* Coste: se lee el vector de índices en cada instrucción indexada (O(VL)).
+
+### 1.6 Sumas que se pueden hacer (y cuáles no)
 
 El árbol de `region.instructions` (§1.4.1) **es una partición**: cada instrucción
 ejecutada está en una única rama. Por eso cualquier suma cuenta exactamente lo que
@@ -372,7 +403,8 @@ escritor JSON tiene que reflejarse aquí (y en `schema/profiler_json_schema_v1.j
 
 | Fecha | Cambio en RAVE | Efecto en el contrato |
 |---|---|---|
-| 2026-10-16 | `instr_counters.c` (nuevo) + `instr_data.c` + `callbacks.c`: contador propio por cada instrucción vectorial (630), con `_counter` en el nombre; `gen_instr_counters.py` los agrupa con los niveles de `docs/rvv instr.md` | **Rediseño del contrato (v2)**: los contadores por instrucción pasan a `region.instructions`, con las categorías del listado (§1.4.1), que forman una partición. El bloque de recuentos anterior se conserva en `counters.instructions_previous_version` (§1.1); desaparecen sus desgloses por SEW `arith`/`memory`/`reduction`/`mask`/`other` y los contadores agregados (`vunit_instr`, `vint_instr`…), que se recalculan sumando categorías (§1.5). El bloque SEW se queda con las estadísticas y con lo que **no** se deduce del árbol: `elems_by_kind` y `avg_stride_b`/`stddev_stride_b` (§1.4) |
+| 2026-10-16 | `instr_counters.c` (nuevo) + `instr_data.c` + `callbacks.c`: contador propio por cada instrucción vectorial (630), con `_counter` en el nombre; `gen_instr_counters.py` los agrupa con los niveles de `docs/rvv instr.md` | **Rediseño del contrato (v2)**: los contadores por instrucción pasan a `region.instructions`, con las categorías del listado (§1.4.1), que forman una partición. El bloque de recuentos anterior se conserva en `counters.instructions_previous_version` (§1.1); desaparecen sus desgloses por SEW `arith`/`memory`/`reduction`/`mask`/`other` y los contadores agregados (`vunit_instr`, `vint_instr`…), que se recalculan sumando categorías (§1.6). El bloque SEW se queda con las estadísticas y con lo que **no** se deduce del árbol: `elems_by_kind` y `avg_stride_b`/`stddev_stride_b` (§1.4) |
+| 2026-10-18 | `gen_instr_counters.py` (sumas por prefijo) + `callbacks.c` (rango de direcciones) | **Indexadas colapsadas**: `indexed.load` / `indexed.store` suman todos los encodings (también las segmentadas indexadas, que pierden su nodo). Nuevo bloque opcional `counters.memory_addresses` (§1.5): media del rango `max−min` por instrucción indexada, con el mismo peso para todas al agregar |
 | 2026-10-12 | `inst_trace.c`: nueva traza dinámica por instrucción (JSONL, otro fichero) | Ninguno: este contrato son los contadores agregados por región |
 | 2026-10-12 | `instr_data.c`: las reducciones se marcan con su bit FP/INT | `reduction.int` deja de ser siempre `0`; las reducciones salen de `computation` (§1.4) |
 | 2026-10-12 | `callbacks.c`: los riesgos se separan por registro escalar/vectorial | `dependencies.scalar.*` deja de ser siempre `0` (§1.3) |

@@ -30,6 +30,12 @@ struct rave_counters{
 				 * por forma de encoding, indexada por rave_vinstr_id. */
 				double vinstr[RAVE_VINSTR_COUNT][SEWS];
 
+				/* Perfilado de direcciones de las instrucciones indexadas
+				 * (media del rango max-min tocado por cada una): suma de
+				 * rangos y numero de ejecuciones por contador. */
+				double addr_range_sum[RAVE_VINSTR_COUNT];
+				double addr_range_n[RAVE_VINSTR_COUNT];
+
 				//Memory
 				double velem_mem[SEWS];
 				double vunit_instr[SEWS];

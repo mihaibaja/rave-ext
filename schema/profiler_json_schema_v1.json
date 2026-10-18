@@ -115,7 +115,8 @@
         "global_stats": { "$ref": "#/$defs/globalStats" },
         "dependencies": { "$ref": "#/$defs/dependencies" },
         "instructions_previous_version":
-          { "$ref": "#/$defs/instructionsPreviousVersion" }
+          { "$ref": "#/$defs/instructionsPreviousVersion" },
+        "memory_addresses": { "$ref": "#/$defs/memoryAddresses" }
       }
     },
 
@@ -231,6 +232,27 @@
           "minimum": 0,
           "description": "Distancia media en instrucciones. Si count = 0 vale 0 (no es un error)."
         }
+      }
+    },
+
+    "memoryAddresses": {
+      "type": "object",
+      "description": "Distancias de las instrucciones indexadas: para cada una, media del rango (max - min, en bytes) de sus direcciones efectivas. `load` y `store` son la media de esas medias dando el mismo peso a cada instruccion (no al numero de ejecuciones). Opcional: los JSON anteriores no lo traen.",
+      "additionalProperties": false,
+      "properties": {
+        "load": { "$ref": "#/$defs/addressRange" },
+        "store": { "$ref": "#/$defs/addressRange" }
+      }
+    },
+    "addressRange": {
+      "type": "object",
+      "description": "instr = numero de instrucciones distintas promediadas; executions = ejecuciones totales de esas instrucciones.",
+      "required": ["instr", "executions", "avg_range_b"],
+      "additionalProperties": false,
+      "properties": {
+        "instr": { "type": "integer", "minimum": 0 },
+        "executions": { "type": "integer", "minimum": 0 },
+        "avg_range_b": { "type": "number", "minimum": 0 }
       }
     },
 

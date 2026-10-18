@@ -379,7 +379,10 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 
 #endif
 		if (is_subtype(instr->type, T_MEMORY)){
-			if (TRACE_ADDR || INST_TRACE_ENABLED){
+			/* la base rs1 hace falta para TRACE_ADDR, para la traza y para
+			 * medir el rango de direcciones de las indexadas */
+			int is_indexed = is_subsubtype(instr->type, T_INDEX);
+			if (TRACE_ADDR || INST_TRACE_ENABLED || is_indexed){
 				int src1 = (instr->instr32>>15)&0x1F;
 				addr = get_xreg(state,src1);
 			}
@@ -388,18 +391,48 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 				int src2 = (instr->instr32>>20)&0x1F;
 				stride = get_xreg(state,src2);
 			}
+			int data_sew = sew;      /* SEW del dato (escala del offset) */
 #ifndef RVV_07
 			int width = (instr->instr32 >> 12)&0x3; 
-			sew = width;
+			sew = width;             /* SEW del indice (como leer el vector) */
 #endif
 
-			if((TRACE_INDEXES || INST_TRACE_ENABLED) && is_subsubtype(instr->type, T_INDEX)){
+			if((TRACE_INDEXES || INST_TRACE_ENABLED || is_indexed) && is_indexed){
 				int src2 = (instr->instr32>>20)&0x1F;
 				char * contents = get_vreg(state,src2,vl*(2<<(sew)));
 				if (sew==0) indexes_8 = (int8_t*)contents;
 				else if (sew==1) indexes_16 = (int16_t*)contents;
 				else if (sew==2) indexes_32 = (int32_t*)contents;
 				else if (sew==3) indexes_64 = (int64_t*)contents;
+			}
+
+			/* Rango de direcciones de esta ejecucion: base + indice*EEW.
+			 * Se acumula (max-min) y el numero de ejecuciones por
+			 * instruccion; el informe publica la media del rango. */
+			if (is_indexed && instr->vinstr_idx >= 0 && vl > 0){
+				int64_t emin = 0, emax = -1, step = (int64_t)1 << data_sew;
+				for (uint64_t i = 0; i < vl; ++i){
+					int64_t idx = indexes_8 ? (int64_t)indexes_8[i] :
+					             indexes_16 ? (int64_t)indexes_16[i] :
+					             indexes_32 ? (int64_t)indexes_32[i] :
+					             indexes_64 ? (int64_t)indexes_64[i] : 0;
+					int64_t a = (int64_t)addr + idx * step;
+					if (emax < 0){ emin = emax = a; }
+					if (a < emin) emin = a;
+					if (a > emax) emax = a;
+				}
+				if (emax >= emin){
+					state->accum_counters.addr_range_sum[instr->vinstr_idx] +=
+						(double)(emax - emin);
+					state->accum_counters.addr_range_n[instr->vinstr_idx] += 1;
+				}
+			}
+
+			/* si nadie mas los va a usar, liberar los indices ya */
+			if (!TRACE_INDEXES && !INST_TRACE_ENABLED){
+				free(indexes_8); free(indexes_16); free(indexes_32); free(indexes_64);
+				indexes_8 = NULL; indexes_16 = NULL;
+				indexes_32 = NULL; indexes_64 = NULL;
 			}
 
 #ifndef RVV_07

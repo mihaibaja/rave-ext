@@ -410,6 +410,38 @@ void print_counters_json(FILE * fd, rave_counters * c){
 	json_obj_close(fd);
 	json_obj_close(fd);
 
+	/* Distancias de las indexadas: para cada instruccion, media del rango
+	 * (max-min) de direcciones; en el JSON, la media de esas medias dando el
+	 * mismo peso a cada instruccion (no al numero de ejecuciones). */
+	json_obj_open(fd, &f, "memory_addresses");
+	{
+		const char * grupos[2] = { "load", "store" };
+		int h0 = 1;      /* primer miembro de memory_addresses */
+		for (int g = 0; g < 2; ++g){
+			double n_instr = 0, suma_medias = 0, ejecuciones = 0;
+			int h = 1;
+			for (int i = 0; i < RAVE_VINSTR_COUNT; ++i){
+				const char * mn;
+				if (rave_vinstr_category_of(i) != RAVE_VINSTR_CAT_INDEXED) continue;
+				if (c->addr_range_n[i] <= 0) continue;
+				mn = rave_vinstr_mnemonic(i);
+				if (mn == NULL) continue;
+				if (g == 0 && !(mn[0] == 'v' && mn[1] == 'l')) continue;
+				if (g == 1 && !(mn[0] == 'v' && mn[1] == 's')) continue;
+				suma_medias += c->addr_range_sum[i] / c->addr_range_n[i];
+				ejecuciones += c->addr_range_n[i];
+				n_instr += 1;
+			}
+			if (n_instr <= 0) continue;
+			json_obj_open(fd, &h0, grupos[g]);
+				json_int(fd, &h, "instr", n_instr);
+				json_int(fd, &h, "executions", ejecuciones);
+				json_num(fd, &h, "avg_range_b", suma_medias / n_instr);
+			json_obj_close(fd);
+		}
+	}
+	json_obj_close(fd);
+
 	json_obj_open(fd, &f, "instructions_previous_version");
 	g = 1;
 	json_int(fd, &g, "total", totinstr);
@@ -461,6 +493,23 @@ static void print_instr_category_json(FILE * fd, int * first, int cat,
 	for (int c = 0; c < RAVE_VINSTR_NCAT; ++c)
 		if (rave_vinstr_categories[c].parent == cat && cat_tot[c] > 0)
 			print_instr_category_json(fd, &inner, c, instr_tot, cat_tot);
+	/* Las indexadas no se emiten una a una: se suman por prefijo del
+	 * mnemonico en dos claves, `load` (vl*) y `store` (vs*). */
+	if (cat == RAVE_VINSTR_CAT_INDEXED){
+		double load = 0, store = 0;
+		for (int i = 0; i < RAVE_VINSTR_COUNT; ++i){
+			const char * mn;
+			if (rave_vinstr_category_of(i) != cat || instr_tot[i] <= 0) continue;
+			mn = rave_vinstr_mnemonic(i);
+			if (mn == NULL) continue;
+			if (mn[0] == 'v' && mn[1] == 'l') load += instr_tot[i];
+			else if (mn[0] == 'v' && mn[1] == 's') store += instr_tot[i];
+		}
+		if (load > 0) json_int(fd, &inner, "load", load);
+		if (store > 0) json_int(fd, &inner, "store", store);
+		json_obj_close(fd);
+		return;
+	}
 	for (int i = 0; i < RAVE_VINSTR_COUNT; ++i)
 		if (rave_vinstr_category_of(i) == cat && instr_tot[i] > 0)
 			json_int(fd, &inner, rave_vinstr_name(i), instr_tot[i]);

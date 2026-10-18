@@ -377,6 +377,13 @@ def summarize(doc):
             top = sorted(counted.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
             lines.append("    top_instr: "
                          + ", ".join(f"{name}={count}" for name, count in top))
+        addr = (region.get("counters") or {}).get("memory_addresses") or {}
+        grupos = [f"{name}={r['avg_range_b']:.1f}B ({r['instr']} instr, "
+                  f"{r['executions']} ejec.)"
+                  for name, r in addr.items()
+                  if isinstance(r, dict) and "avg_range_b" in r]
+        if grupos:
+            lines.append("    rango de direcciones (media): " + ", ".join(grupos))
 
     return lines
 
@@ -402,6 +409,12 @@ def dump(doc):
                          f"{kinds.get('reduction', 0)}/{kinds.get('mask', 0)} "
                          f"| stride={block.get('avg_stride_b', 0)}"
                          f"±{block.get('stddev_stride_b', 0)}")
+
+        addr = (region.get("counters") or {}).get("memory_addresses") or {}
+        for name, r in addr.items():
+            if isinstance(r, dict) and "avg_range_b" in r:
+                lines.append(f"  {name}: avg_range={r['avg_range_b']:.1f}B "
+                             f"({r['instr']} instr, {r['executions']} ejec.)")
 
         def walk(node, depth):
             for name, value in node.items():
