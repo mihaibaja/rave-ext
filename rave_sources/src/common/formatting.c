@@ -101,3 +101,120 @@ void indent(FILE * fd, int level, int is_last){
 	else indent_sub(-inc,is_last);
 	fprintf(fd,"%s─ ",ic.buffer);
 }
+
+/* -------------------------------------------------------------------------- */
+/* Minimal JSON writer (pretty printed, one member per line, 2-space nesting)  */
+/* -------------------------------------------------------------------------- */
+
+static int json_level = 0;
+
+void json_reset(void){
+	json_level = 0;
+}
+
+void json_push(void){
+	++json_level;
+}
+
+void json_pop(void){
+	if (json_level > 0) --json_level;
+}
+
+void json_indent(FILE * fd){
+	fputc('\n', fd);
+	for(int i=0; i<json_level; ++i) fputs("  ", fd);
+}
+
+static void json_key(FILE * fd, int * first, const char * key){
+	if (!*first) fputc(',', fd);
+	*first = 0;
+	json_indent(fd);
+	fputc('"', fd);
+	json_escape(fd, key);
+	fputs("\": ", fd);
+}
+
+void json_sep(FILE * fd, int * first){
+	if (!*first) fputc(',', fd);
+	*first = 0;
+}
+
+void json_elem(FILE * fd, int * first){
+	if (!*first) fputc(',', fd);
+	*first = 0;
+	json_indent(fd);
+}
+
+void json_obj_open(FILE * fd, int * first, const char * key){
+	json_key(fd, first, key);
+	fputc('{', fd);
+	json_push();
+}
+
+void json_obj_close(FILE * fd){
+	json_pop();
+	json_indent(fd);
+	fputc('}', fd);
+}
+
+void json_arr_open(FILE * fd, int * first, const char * key){
+	json_key(fd, first, key);
+	fputc('[', fd);
+	json_push();
+}
+
+void json_arr_close(FILE * fd){
+	json_pop();
+	json_indent(fd);
+	fputc(']', fd);
+}
+
+void json_num(FILE * fd, int * first, const char * key, double value){
+	json_key(fd, first, key);
+	if (value == (double)(long long)value) fprintf(fd, "%.0f", value);
+	else fprintf(fd, "%.6f", value);
+}
+
+void json_int(FILE * fd, int * first, const char * key, double value){
+	json_key(fd, first, key);
+	fprintf(fd, "%.0f", value);
+}
+
+void json_bool(FILE * fd, int * first, const char * key, int value){
+	json_key(fd, first, key);
+	fputs(value ? "true" : "false", fd);
+}
+
+void json_key_only(FILE * fd, int * first, const char * key){
+	json_key(fd, first, key);
+}
+
+void json_str(FILE * fd, int * first, const char * key, const char * value){
+	json_key(fd, first, key);
+	if (value == NULL){
+		fputs("null", fd);
+	}else{
+		fputc('"', fd);
+		json_escape(fd, value);
+		fputc('"', fd);
+	}
+}
+
+void json_escape(FILE * fd, const char * s){
+	if (s == NULL) return;
+	for(; *s; ++s){
+		unsigned char c = (unsigned char)*s;
+		switch(c){
+			case '"':  fputs("\\\"", fd); break;
+			case '\\': fputs("\\\\", fd); break;
+			case '\n': fputs("\\n", fd); break;
+			case '\t': fputs("\\t", fd); break;
+			case '\r': fputs("\\r", fd); break;
+			case '\b': fputs("\\b", fd); break;
+			case '\f': fputs("\\f", fd); break;
+			default:
+				if (c < 0x20) fprintf(fd, "\\u%04x", c);
+				else fputc(c, fd);
+		}
+	}
+}

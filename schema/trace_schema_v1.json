@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RAVE Instruction Trace Schema",
+  "version": "1.0.0",
+  "description": "Schema for hardware-independent dynamic instruction trace produced by RAVE",
+  "oneOf": [
+    {
+      "title": "Header Record",
+      "type": "object",
+      "required": [
+        "record_type",
+        "schema_version",
+        "rave_version",
+        "isa_revision",
+        "vlen",
+        "elen",
+        "workload",
+        "config",
+        "num_harts",
+        "addr_normalization"
+      ],
+      "properties": {
+        "record_type": { "type": "string", "const": "header" },
+        "schema_version": { "type": "string", "pattern": "^1\\.[0-9]+\\.[0-9]+$" },
+        "rave_version": { "type": "string" },
+        "isa_revision": { "type": "string", "enum": ["RVV-1.0", "RVV-0.7.1"] },
+        "vlen": { "type": "integer", "minimum": 1 },
+        "elen": { "type": "integer", "minimum": 1 },
+        "workload": { "type": "string" },
+        "config": {
+          "type": "object",
+          "properties": {
+            "raw_dist": { "type": "integer" },
+            "war_dist": { "type": "integer" },
+            "waw_dist": { "type": "integer" },
+            "trace_scalar": { "type": "integer" }
+          }
+        },
+        "num_harts": { "type": "integer", "minimum": 1 },
+        "addr_normalization": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    {
+      "title": "Dynamic Instruction Record",
+      "type": "object",
+      "required": [
+        "record_type",
+        "seqno",
+        "hart",
+        "pc",
+        "binary",
+        "op",
+        "asm",
+        "decoded_op",
+        "dst",
+        "srcs",
+        "vl",
+        "sew",
+        "lmul",
+        "vta",
+        "vma",
+        "vstart",
+        "masked",
+        "active_elements",
+        "deps"
+      ],
+      "properties": {
+        "record_type": { "type": "string", "const": "inst" },
+        "seqno": { "type": "integer", "minimum": 1 },
+        "hart": { "type": "integer", "minimum": 0 },
+        "pc": { "type": "string", "pattern": "^0x[0-9a-fA-F]+$" },
+        "binary": { "type": "string", "pattern": "^0x[0-9a-fA-F]+$" },
+        "op": { "type": "string" },
+        "asm": { "type": "string" },
+        "decoded_op": { "type": "string" },
+        "dst": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "srcs": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "vl": { "type": "integer", "minimum": 0 },
+        "sew": { "type": "integer", "minimum": 0 },
+        "lmul": { "type": "string" },
+        "vta": { "type": "integer", "enum": [0, 1] },
+        "vma": { "type": "integer", "enum": [0, 1] },
+        "vstart": { "type": "integer", "minimum": 0 },
+        "masked": { "type": "boolean" },
+        "active_elements": { "type": "integer", "minimum": 0 },
+        "deps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["operand", "dep_type", "producer_seqno", "distance"],
+            "properties": {
+              "operand": { "type": "string" },
+              "dep_type": { "type": "string", "enum": ["RAW", "WAR", "WAW"] },
+              "producer_seqno": { "type": "integer", "minimum": 0 },
+              "distance": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    {
+      "title": "Auxiliary Record",
+      "type": "object",
+      "required": ["record_type", "seqno", "aux_type"],
+      "properties": {
+        "record_type": { "type": "string", "const": "aux" },
+        "seqno": { "type": "integer", "minimum": 1 },
+        "aux_type": {
+          "type": "string",
+          "enum": ["mask_bitmap", "mem_addrs", "gather_indices", "slide_compress", "element_data"]
+        }
+      },
+      "additionalProperties": true
+    }
+  ]
+}

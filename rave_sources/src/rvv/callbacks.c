@@ -13,7 +13,14 @@
 #include "utils.h"
 #include "profiling.h"
 #include "scalar_blocks.h"
+#include "inst_trace.h"
 #include <sched.h>
+
+static void record_vector_register(double * usage, short reg){
+	if (reg >= RAVE_INI_REG_V && reg < RAVE_INI_REG_V + NUM_VECTOR_REGS) {
+		usage[reg - RAVE_INI_REG_V] = 1;
+	}
+}
 
 inline uint64_t synch_threads(thread_state_t * state){
 	int cpu_index = state->cpu_index;
@@ -84,7 +91,35 @@ void scalar_block_exec(thread_state_t * state, scalar_block_data_t * data){
 	int n_instr = data->instr;
 
 	if (TRACE_ENABLED){
+        if (INST_TRACE_ENABLED && TRACE_SCALAR){
+            for(int i=0; i<n_instr; ++i){
+                inst_trace_emit_scalar(state,
+                                       data->PCs ? data->PCs[i] : 0,
+                                       (data->strings ? data->strings[i] : NULL),
+                                       0,
+                                       (data->dst_d ? data->dst_d[i] : -1),
+                                       (data->src1_d ? data->src1_d[i] : -1),
+                                       (data->src2_d ? data->src2_d[i] : -1));
+            }
+        }
+        if(TRACE_EXTENDED){
+            for(int i=0; i<n_instr; ++i){
+                // -ADDED
+                inst_compressed_t instr_c;
+                instr_c.asm_string = data->strings[i];
+                uint64_t pos_aux = 0;
+                for(int j=0; j<SEWS; ++j){
+                    pos_aux+=state->accum_counters.vector_instr[j];
+                }
+                instr_c.pos = state->accum_counters.scalar_instr+state->accum_counters.vsetvl_instr+pos_aux+1;
+                instr_c.type = 0x0000; //Scalar instruction
 
+				if(valid_reg_id(data->dst_d[i])) state->write_reg_deps[data->dst_d[i]] = instr_c;
+				if(valid_reg_id(data->src1_d[i])) state->read_reg_deps[data->src1_d[i]] = instr_c;
+
+                // -ENDADDED
+            }
+        }
 		//LOOP PROFILER CONTROL
 		if (PRINT_PROFILE){
 			for(int i=0; i<n_instr; ++i){
@@ -218,9 +253,23 @@ void rolling_scalar_block(uint32_t opcode, uint64_t PC, scalar_block_data_t * da
 		++data->instr;
 }
 
+inline int count_1s(char * reg, int vlB){
+    int i = 0, contador = 0;
+    bool terminado = false;
+    while(i*8 < vlB && !terminado){
+        for(int j = 0; j < 8 && !terminado; j++){
+            contador += ((reg[i]>>j)&0x1)?1:0;
+            if(i*8+j+1 >= vlB) terminado = true;
+        }
+        i++;
+    }
+    return contador;
+}
+
 //Vector and vsetvli instructions
 void insn_exec(thread_state_t * state, instr_data * instr){
 
+    if(DEBUG_INFO) fprintf(stdout, "Executing instruction: %s\n", instr->asm_string);
 	uint64_t thread_timestamp = synch_threads(state);
 	if (thread_timestamp==(uint64_t)-1) return;
 
@@ -237,7 +286,7 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 	}
 
 	int row = SCALAR_ROW;
-	uint64_t vl=0, vtype, sew=3, lmul=1, rvl=0;
+	uint64_t vl=0, vtype = 0, sew=3, lmul=1, rvl=0;
 	//double lmul_value;
 	uint64_t addr = 0;
 	int stride = 0;
@@ -247,7 +296,89 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 	int32_t * indexes_32 = NULL;
 	int64_t * indexes_64 = NULL;
 
+    // To keep track of dependencies
+    if(TRACE_EXTENDED){
+        inst_compressed_t instr_c;
+        instr_c.asm_string = instr->asm_string;
+        uint64_t pos_aux = 0;
+        for(int j=0; j<SEWS; ++j){
+            pos_aux+=state->accum_counters.vector_instr[j];
+        }
+        instr_c.pos = state->accum_counters.scalar_instr+state->accum_counters.vsetvl_instr+pos_aux+1;
+        instr_c.type = instr->type;
+        if(valid_reg_id(instr->dst_d)){
+            if(state->write_reg_deps[instr->dst_d].pos != 0
+                && (instr_c.pos-state->write_reg_deps[instr->dst_d].pos <= WAW_DIST)) {
+                    if (instr->dst_d >= RAVE_INI_REG_V) { // If the destination register is a vector register, count it as a VWAW dependency
+                        state->accum_counters.VWAW_deps++;
+                        state->accum_counters.avg_VWAW_deps += instr_c.pos-state->write_reg_deps[instr->dst_d].pos;
+                    } else {                              // Otherwise, count it as a WAW dependency(dependencie with scalar instructions)
+                        state->accum_counters.WAW_deps++;
+                    }
+                    if(DEBUG_INFO) fprintf(stdout, "WAW dependency detected on register %d: write at pos %li, instruction: %s, previous write at pos %li, previous instruction: %s\n", 
+                        instr->dst_d, instr_c.pos, instr->asm_string, 
+                        state->write_reg_deps[instr->dst_d].pos, state->write_reg_deps[instr->dst_d].asm_string);            
+            }
+            if(state->write_reg_deps[instr->dst_d].pos != 0
+                && (instr_c.pos-state->read_reg_deps[instr->dst_d].pos <= WAR_DIST)) {
+                    if (instr->dst_d >= RAVE_INI_REG_V) {
+                        state->accum_counters.VWAR_deps++;
+                        state->accum_counters.avg_VWAR_deps += instr_c.pos-state->read_reg_deps[instr->dst_d].pos;
+                    } else {
+                        state->accum_counters.WAR_deps++;
+                    }
+                    if(DEBUG_INFO) fprintf(stdout, "WAR dependency detected on register %d: write at pos %li, instruction: %s, previous read at pos %li, previous instruction: %s\n", 
+                        instr->dst_d, instr_c.pos, instr->asm_string, 
+                        state->read_reg_deps[instr->dst_d].pos, state->read_reg_deps[instr->dst_d].asm_string);
+            }
+        }
+        if(valid_reg_id(instr->src1_d) && (instr->src1_d > 0 && state->write_reg_deps[instr->src1_d].pos != 0)
+            && (instr_c.pos-state->write_reg_deps[instr->src1_d].pos <= RAW_DIST)) {
+                if (instr->src1_d >= RAVE_INI_REG_V) {
+                    state->accum_counters.VRAW_deps++;
+                    state->accum_counters.avg_VRAW_deps += instr_c.pos-state->write_reg_deps[instr->src1_d].pos;
+                } else {
+                    state->accum_counters.RAW_deps++;
+                }
+                if(DEBUG_INFO) fprintf(stdout, "RAW dependency detected on register %d: read at pos %li, instruction: %s, previous write at pos %li, previous instruction: %s\n", 
+                    instr->src1_d, instr_c.pos, instr->asm_string, 
+                    state->write_reg_deps[instr->src1_d].pos, state->write_reg_deps[instr->src1_d].asm_string);
+        }
+        if(valid_reg_id(instr->src2_d) &&(instr->src2_d > 0 && state->write_reg_deps[instr->src2_d].pos != 0)
+            && (instr_c.pos-state->write_reg_deps[instr->src2_d].pos <= RAW_DIST)){
+                if (instr->src2_d >= RAVE_INI_REG_V) {
+                    state->accum_counters.VRAW_deps++;
+                    state->accum_counters.avg_VRAW_deps += instr_c.pos-state->write_reg_deps[instr->src2_d].pos;
+                } else {
+                    state->accum_counters.RAW_deps++;
+                }
+                if(DEBUG_INFO) fprintf(stdout, "RAW dependency detected on register %d: read at pos %li, instruction: %s, previous write at pos %li, previous instruction: %s\n", 
+                    instr->src2_d, instr_c.pos, instr->asm_string, 
+                    state->write_reg_deps[instr->src2_d].pos, state->write_reg_deps[instr->src2_d].asm_string);
+        }
+        if(valid_reg_id(instr->src3_d) &&(instr->src3_d > 0 && state->write_reg_deps[instr->src3_d].pos != 0)
+            && (instr_c.pos-state->write_reg_deps[instr->src3_d].pos <= RAW_DIST)){
+                if (instr->src3_d >= RAVE_INI_REG_V) {
+                    state->accum_counters.VRAW_deps++;
+                    state->accum_counters.avg_VRAW_deps += instr_c.pos-state->write_reg_deps[instr->src3_d].pos;
+                } else {
+                    state->accum_counters.RAW_deps++;
+                }
+                if(DEBUG_INFO) fprintf(stdout, "RAW dependency detected on register %d: read at pos %li, instruction: %s, previous write at pos %li, previous instruction: %s\n", 
+                    instr->src3_d, instr_c.pos, instr->asm_string, 
+                    state->write_reg_deps[instr->src3_d].pos, state->write_reg_deps[instr->src3_d].asm_string);
+        }
+        if(valid_reg_id(instr->dst_d)) state->write_reg_deps[instr->dst_d] = instr_c;
+        if(valid_reg_id(instr->src1_d)) state->read_reg_deps[instr->src1_d] = instr_c;
+        if(valid_reg_id(instr->src2_d)) state->read_reg_deps[instr->src2_d] = instr_c;
+        if(valid_reg_id(instr->src3_d)) state->read_reg_deps[instr->src3_d] = instr_c;
+    }
+
 	if (is_type(instr->type, T_VECTOR)){ //VECTOR
+		record_vector_register(state->accum_counters.vector_register_usage, instr->dst);
+		record_vector_register(state->accum_counters.vector_register_usage, instr->src1);
+		record_vector_register(state->accum_counters.vector_register_usage, instr->src2);
+		record_vector_register(state->accum_counters.vector_register_usage, instr->src3);
 		loop_profile -> used_vreg[((instr->instr32)>>7)&0x1F] = 1;
 		row = VECTOR_ROW;
 		vl = get_vl(state); 
@@ -261,7 +392,10 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 
 #endif
 		if (is_subtype(instr->type, T_MEMORY)){
-			if (TRACE_ADDR){
+			/* la base rs1 hace falta para TRACE_ADDR, para la traza y para
+			 * medir el rango de direcciones de las indexadas */
+			int is_indexed = is_subsubtype(instr->type, T_INDEX);
+			if (TRACE_ADDR || INST_TRACE_ENABLED || is_indexed){
 				int src1 = (instr->instr32>>15)&0x1F;
 				addr = get_xreg(state,src1);
 			}
@@ -270,18 +404,48 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 				int src2 = (instr->instr32>>20)&0x1F;
 				stride = get_xreg(state,src2);
 			}
+			int data_sew = sew;      /* SEW del dato (escala del offset) */
 #ifndef RVV_07
 			int width = (instr->instr32 >> 12)&0x3; 
-			sew = width;
+			sew = width;             /* SEW del indice (como leer el vector) */
 #endif
 
-			if(TRACE_INDEXES && is_subsubtype(instr->type, T_INDEX)){
+			if((TRACE_INDEXES || INST_TRACE_ENABLED || is_indexed) && is_indexed){
 				int src2 = (instr->instr32>>20)&0x1F;
 				char * contents = get_vreg(state,src2,vl*(2<<(sew)));
 				if (sew==0) indexes_8 = (int8_t*)contents;
 				else if (sew==1) indexes_16 = (int16_t*)contents;
 				else if (sew==2) indexes_32 = (int32_t*)contents;
 				else if (sew==3) indexes_64 = (int64_t*)contents;
+			}
+
+			/* Rango de direcciones de esta ejecucion: base + indice*EEW.
+			 * Se acumula (max-min) y el numero de ejecuciones por
+			 * instruccion; el informe publica la media del rango. */
+			if (is_indexed && instr->vinstr_idx >= 0 && vl > 0){
+				int64_t emin = 0, emax = -1, step = (int64_t)1 << data_sew;
+				for (uint64_t i = 0; i < vl; ++i){
+					int64_t idx = indexes_8 ? (int64_t)indexes_8[i] :
+					             indexes_16 ? (int64_t)indexes_16[i] :
+					             indexes_32 ? (int64_t)indexes_32[i] :
+					             indexes_64 ? (int64_t)indexes_64[i] : 0;
+					int64_t a = (int64_t)addr + idx * step;
+					if (emax < 0){ emin = emax = a; }
+					if (a < emin) emin = a;
+					if (a > emax) emax = a;
+				}
+				if (emax >= emin){
+					state->accum_counters.addr_range_sum[instr->vinstr_idx] +=
+						(double)(emax - emin);
+					state->accum_counters.addr_range_n[instr->vinstr_idx] += 1;
+				}
+			}
+
+			/* si nadie mas los va a usar, liberar los indices ya */
+			if (!TRACE_INDEXES && !INST_TRACE_ENABLED){
+				free(indexes_8); free(indexes_16); free(indexes_32); free(indexes_64);
+				indexes_8 = NULL; indexes_16 = NULL;
+				indexes_32 = NULL; indexes_64 = NULL;
 			}
 
 #ifndef RVV_07
@@ -323,6 +487,19 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 			release_lock(write_lock);
 		}
 
+		//  Instruction Trace  //
+		if (INST_TRACE_ENABLED){
+			if (is_type(instr->type, T_VSETVL)){
+				inst_trace_emit_vsetvl(state, instr, rvl, vl, vtype);
+			}else{
+				void * idx_ptr = indexes_8 ? (void*)indexes_8 :
+				                 indexes_16 ? (void*)indexes_16 :
+				                 indexes_32 ? (void*)indexes_32 : (void*)indexes_64;
+				inst_trace_emit_vector(state, instr, vl, sew, lmul, vtype, addr, stride,
+				                       idx_ptr, is_subsubtype(instr->type, T_INDEX));
+			}
+		}
+
 		//  PRV  //
 		if (PRINT_PRV){
 			int cpu_index = state->cpu_index;
@@ -362,18 +539,22 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 						trace_event_value(FD_PRV, event_indexes, 1);
 						for(uint64_t i=0; i<vl; ++i) trace_event_value(FD_PRV, event_indexes+1+i, (int)indexes_8[i]);
 						free(indexes_8);
+						indexes_8 = NULL;
 					}else if (indexes_16 != NULL){
 						trace_event_value(FD_PRV, event_indexes, 1);
 						for(uint64_t i=0; i<vl; ++i)  trace_event_value(FD_PRV, event_indexes+1+i, (int)indexes_16[i]);
 						free(indexes_16);
+						indexes_16 = NULL;
 					}else if (indexes_32 != NULL){
 						trace_event_value(FD_PRV, event_indexes, 1);
 						for(uint64_t i=0; i<vl; ++i)  trace_event_value(FD_PRV, event_indexes+1+i, (int)indexes_32[i]);
 						free(indexes_32);
+						indexes_32 = NULL;
 					}else if (indexes_64 != NULL){
 						trace_event_value(FD_PRV, event_indexes, 1);
 						for(uint64_t i=0; i<vl; ++i)  trace_event_value(FD_PRV, event_indexes+1+i, indexes_64[i]);
 						free(indexes_64);
+						indexes_64 = NULL;
 					}
 				}
 				if (MUSA){
@@ -408,6 +589,11 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 		}
 	}
 
+	if (indexes_8) { free(indexes_8); indexes_8 = NULL; }
+	if (indexes_16) { free(indexes_16); indexes_16 = NULL; }
+	if (indexes_32) { free(indexes_32); indexes_32 = NULL; }
+	if (indexes_64) { free(indexes_64); indexes_64 = NULL; }
+
 	// Counters //
 	loop_profile->loop_instr++; 
 	if (is_type(instr->type, T_VECTOR)) {
@@ -420,40 +606,201 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 		state->scalar_instr_since_vector=0;
 		++state->accum_counters.vector_instr[sew];
 		state->accum_counters.velem[sew] += vl;
-		if (is_subtype(instr->type, T_ARITH)){
-			if (is_subsubtype(instr->type, T_FP)){
-				++state->accum_counters.vfp_instr[sew];
-				state->accum_counters.velem_arith[sew] += vl; 
-				if (is_subsubsubtype(instr->type, T_FUSED)) state->accum_counters.vectorflops += 2*vl; 
-				else state->accum_counters.vectorflops += vl;
-			}else if (is_subsubtype(instr->type, T_INT)){
-				++state->accum_counters.vint_instr[sew];
-				state->accum_counters.velem_arith[sew] += vl; 
-			}
-		}else if (is_subtype(instr->type, T_REDUCTION)){
-			state->accum_counters.velem_reductions[sew] += vl;
-			if (is_subsubtype(instr->type, T_FP)){
-				++state->accum_counters.vfp_reductions[sew];
-			}else if (is_subsubtype(instr->type, T_INT)){
-				++state->accum_counters.vint_reductions[sew];
-			}
-		}else if (is_subtype(instr->type, T_MASK)){
-			++state->accum_counters.vmask_instr[sew];
-			state->accum_counters.velem_mask[sew] += vl; 
-		}else if (is_subtype(instr->type, T_MEMORY)){
-			state->accum_counters.moved_bytes_v += vl*(1<<(sew));
-			state->accum_counters.velem_mem[sew] += vl; 
-			if (is_subsubtype(instr->type, T_UNIT)) ++state->accum_counters.vunit_instr[sew];
-			else if (is_subsubtype(instr->type, T_STRIDE)){
-				++state->accum_counters.vstride_instr[sew];
-				state->accum_counters.agg_strides[sew] += stride;
-			}
-			else if (is_subsubtype(instr->type, T_INDEX)) ++state->accum_counters.vidx_instr[sew];
-			else if (is_subsubtype(instr->type, T_SPILL)) ++state->accum_counters.vspill_instr[sew];
-		}
+		// Contador propio de la instruccion (independiente de TRACE_EXTENDED).
+		if (instr->vinstr_idx >= 0)
+			++state->accum_counters.vinstr[instr->vinstr_idx][sew];
+
+        if(TRACE_EXTENDED){
+            // To track accumulated vl, lmul, occupancy...
+            vtype = get_vtype(state);
+            double real_lmul = 0;
+            double real_sew_bits = 8 << sew; // 0,1,2,3 -> SEW 8,16,32,64
+            bool ta = (vtype >> 6) & 0x1; // ta bit
+            //bool ma = (vtype >> 7) & 0x1; // ma bit
+            if (lmul < 4) {
+                real_lmul = (double)(1 << lmul); // 0,1,2,3 -> 1,2,4,8
+            } 
+            #ifndef RVV_07
+            else {
+                // Soporte para fractional LMUL en RVV 1.0 (Códigos 5,6,7 -> 1/8, 1/4, 1/2)
+                real_lmul = 1.0 / (double)(1 << (8 - lmul)); 
+            }
+            #endif
+
+            double effective_vl = (vl * real_sew_bits)>(RAVE_VLMAX * real_lmul) ? RAVE_VLMAX * real_lmul : (vl * real_sew_bits);
+            state->accum_counters.vl_accumulated_b += effective_vl; // Acumulación de VL en bits
+            state->accum_counters.VLMAX_accumulated += RAVE_VLMAX*real_lmul/real_sew_bits; // Acumulación de VLMAX para avg
+            state->accum_counters.lmul_accumulated += real_lmul;
+
+            if(effective_vl < real_lmul*RAVE_VLMAX) {
+                if(ta)
+                    state->accum_counters.ta_count++;
+                else
+                    state->accum_counters.tu_count++;
+            }
+            double occupancy = (RAVE_VLMAX * real_lmul > 0) ? effective_vl / (RAVE_VLMAX * real_lmul) : 0;
+            state->accum_counters.occupancy_accumulated += occupancy;
+
+            // Extended type counters.
+            if(is_type_ext(instr->type_ext, MASK_EXT_BASE, TYPE_EXT_ARITH)){
+                if(is_type_ext(instr->type_ext, TYPE_EXT_MASKED, TYPE_EXT_MASKED)){
+                    state->accum_counters.vmasked_instr[1][sew]++;
+                    char * mask = get_vreg(state,0,effective_vl);
+                    int num_1s = count_1s(mask, effective_vl/real_sew_bits);
+                    free(mask);
+                    state->accum_counters.vmasked_disp[1][sew] += (num_1s/(effective_vl/real_sew_bits));
+                    state->accum_counters.vmasked_disp_squared[1][sew] += (num_1s/(effective_vl/real_sew_bits))*(num_1s/(effective_vl/real_sew_bits));
+                }
+                state->accum_counters.velem_arith[sew] += vl; 
+                if(is_type_ext(instr->type_ext, TYPE_EXT_FP, TYPE_EXT_FP)){
+                    ++state->accum_counters.vfp_instr[sew];
+                    if (is_subsubsubtype(instr->type, T_FUSED)) state->accum_counters.vectorflops += 2*vl; // e.g. FMA. We use current decoding as it's exactly as we needed in this aspect.
+                    else state->accum_counters.vectorflops += vl;
+                }else{
+                    ++state->accum_counters.vint_instr[sew];
+                }
+
+                if(is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_ARITH_WIDENING)){
+                    ++state->accum_counters.vwidening_instr[sew];
+                    if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_COMP_FUSED)){
+                        ++state->accum_counters.vwfused_instr[sew];
+                    } else if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_REDUCTION)){
+                        if(is_type_ext(instr->type_ext, TYPE_EXT_FP, TYPE_EXT_INT)){
+                            ++state->accum_counters.vint_reductions[sew];
+                        } else {
+                            ++state->accum_counters.vfp_reductions[sew];
+                        }
+                    }
+                } else if(is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_ARITH_NARROWING)) {
+                    ++state->accum_counters.vnarrowing_instr[sew];
+                } else {
+                    if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_MOVE)){
+                        ++state->accum_counters.vmove_instr[sew];
+                        if(is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_WRITE_SCALAR)){
+                            ++state->accum_counters.m_inst_v_s[sew];
+                        } else if(is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_READ_SCALAR)){
+                            ++state->accum_counters.m_inst_s_v[sew];
+                        } else if(is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_WHOLE_REGISTER)){
+                            ++state->accum_counters.vmove_wh_instr[sew];
+                        }
+                    } else {
+                        if(is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_WRITE_SCALAR)){
+                            ++state->accum_counters.inst_v_s[sew];
+                        } else if(is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_READ_SCALAR)){
+                            ++state->accum_counters.inst_s_v[sew];
+                        }
+                        if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_MASK)){
+                            ++state->accum_counters.vmask_instr[sew];
+                        } else if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_COMPRESS)){
+                            ++state->accum_counters.vcmprss_instr[sew];
+                        } else if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_GATHER)){
+                            ++state->accum_counters.vgath_instr[sew];
+                        } else if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_SLIDE)){
+                            if(is_type_ext(instr->type_ext, TYPE_EXT_SLIDE_UP, TYPE_EXT_SLIDE_UP)){
+                                if(is_type_ext(instr->type_ext, TYPE_EXT_SLIDE_1, TYPE_EXT_SLIDE_1)){
+                                    ++state->accum_counters.vslide1up_instr[sew];
+                                }else{
+                                    ++state->accum_counters.vslideup_instr[sew];
+                                }
+                            }else{
+                                if(is_type_ext(instr->type_ext, TYPE_EXT_SLIDE_1, TYPE_EXT_SLIDE_1)){
+                                    ++state->accum_counters.vslide1down_instr[sew];
+                                }else{
+                                    ++state->accum_counters.vslidedown_instr[sew];
+                                }
+                            }
+                        } else if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_COMPUTATION) || 
+                                  is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_COMP_FUSED)){
+                            ++state->accum_counters.vcomputation_instr[sew];
+                            if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_COMP_FUSED)){
+                                ++state->accum_counters.vfused_instr[sew];
+                            }
+                        } else if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_REDUCTION)){
+                            if(is_type_ext(instr->type_ext, TYPE_EXT_FP, TYPE_EXT_INT))
+                                ++state->accum_counters.vint_reductions_n[sew];
+                            else
+                                ++state->accum_counters.vfp_reductions_n[sew];
+                        }
+                    }
+                }
+
+            }else if (is_subtype(instr->type, T_MEMORY)){ // We'll be using type for memory counters.
+                if(is_type_ext(instr->type_ext, TYPE_EXT_MASKED, TYPE_EXT_MASKED)){
+                    state->accum_counters.vmasked_instr[0][sew]++;
+                    char * mask = get_vreg(state,0,effective_vl);
+                    int num_1s = count_1s(mask, effective_vl/real_sew_bits);
+                    free(mask);
+                    state->accum_counters.vmasked_disp[0][sew] += num_1s/(effective_vl/real_sew_bits);
+                    state->accum_counters.vmasked_disp_squared[0][sew] += (num_1s/(effective_vl/real_sew_bits))*(num_1s/(effective_vl/real_sew_bits));
+                }
+                state->accum_counters.moved_bytes_v += vl*(1<<(sew));
+                state->accum_counters.velem_mem[sew] += vl;
+                if (is_subsubtype(instr->type, T_UNIT)) {
+                    ++state->accum_counters.vunit_instr[sew];
+                    if(is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_MEMORY_SEGMENTED)){
+                        ++state->accum_counters.vseg_instr_unit[sew];
+                    }
+                } else if (is_subsubtype(instr->type, T_STRIDE)){
+                    ++state->accum_counters.vstride_instr[sew];
+                    state->accum_counters.agg_strides[sew] += stride;
+                    state->accum_counters.agg_strides_squared[sew] += (double)stride * stride;
+                    if(is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_MEMORY_SEGMENTED)){
+                        ++state->accum_counters.vseg_instr_stride[sew];
+                    }
+                }
+                else if (is_subsubtype(instr->type, T_INDEX)){
+                    ++state->accum_counters.vidx_instr[sew];
+                    if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_MEMORY_ORDERED)){
+                        ++state->accum_counters.vidx_instr_ordered[sew];
+                    }else{
+                        ++state->accum_counters.vidx_instr_unordered[sew];
+                    }
+                    if(is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_MEMORY_SEGMENTED)){
+                        ++state->accum_counters.vseg_instr_idx[sew];
+                    }
+                } 
+                else if (is_subsubtype(instr->type, T_SPILL)) ++state->accum_counters.vspill_instr[sew];
+            }
+            // End of extended type counters.
+        }else {
+            if (is_subtype(instr->type, T_ARITH)){
+                if (is_subsubtype(instr->type, T_FP)){
+                    ++state->accum_counters.vfp_instr[sew];
+                    state->accum_counters.velem_arith[sew] += vl; 
+                    if (is_subsubsubtype(instr->type, T_FUSED)) state->accum_counters.vectorflops += 2*vl; 
+                    else state->accum_counters.vectorflops += vl;
+                }else if (is_subsubtype(instr->type, T_INT)){
+                    ++state->accum_counters.vint_instr[sew];
+                    state->accum_counters.velem_arith[sew] += vl; 
+                }
+            }else if (is_subtype(instr->type, T_REDUCTION)){
+                state->accum_counters.velem_reductions[sew] += vl;
+                if (is_subsubtype(instr->type, T_FP)){
+                    ++state->accum_counters.vfp_reductions[sew];
+                }else if (is_subsubtype(instr->type, T_INT)){
+                    ++state->accum_counters.vint_reductions[sew];
+                }
+            }else if (is_subtype(instr->type, T_MASK)){
+                ++state->accum_counters.vmask_instr[sew];
+                state->accum_counters.velem_mask[sew] += vl; 
+            }else if (is_subtype(instr->type, T_MEMORY)){
+                state->accum_counters.moved_bytes_v += vl*(1<<(sew));
+                state->accum_counters.velem_mem[sew] += vl; 
+                if (is_subsubtype(instr->type, T_UNIT)) ++state->accum_counters.vunit_instr[sew];
+                else if (is_subsubtype(instr->type, T_STRIDE)){
+                    ++state->accum_counters.vstride_instr[sew];
+                    state->accum_counters.agg_strides[sew] += stride;
+                    state->accum_counters.agg_strides_squared[sew] += (double)stride * stride;
+                }
+                else if (is_subsubtype(instr->type, T_INDEX)) ++state->accum_counters.vidx_instr[sew];
+                else if (is_subsubtype(instr->type, T_SPILL)) ++state->accum_counters.vspill_instr[sew];
+            }
+        }
 	}else if (is_type(instr->type, T_VSETVL)){ 
 		loop_profile->loop_weight += 1;
 		++state->accum_counters.vsetvl_instr;
+		if (instr->vinstr_idx >= 0)
+			++state->accum_counters.vinstr[instr->vinstr_idx][sew];
 	}
 
 	thread_timestamp++;
@@ -467,4 +814,3 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 	state->last_was_vsetvl = is_type(instr->type, T_VSETVL);
 
 }
-

@@ -17,6 +17,7 @@
 #include "profiling.h"
 #include "write_pcf.h"
 #include "utils.h"
+#include "inst_trace.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -55,6 +56,9 @@ void rave_exit()
 		print_region_csv(FD_CSV, ACCUM_REGIONS);
 		//print_events_csv(FD_CSV);
 	}
+	if (PRINT_JSON){
+		print_region_json(FD_JSON, ACCUM_REGIONS);
+	}
 
 	if (PRINT_PROFILE){
 		init_dwfl(BINARY_NAME);
@@ -79,6 +83,7 @@ void rave_exit()
 	}
 
 	if (FD_CSV!=NULL) fclose(FD_CSV);
+	if (FD_JSON!=NULL && FD_JSON!=stdout) fclose(FD_JSON);
 	if (FD_REPORT!=NULL) fclose(FD_REPORT);
 	if (FD_PROFILE!=NULL) fclose(FD_PROFILE);
 	if (FD_CALLTRACE!=NULL) fclose (FD_CALLTRACE);
@@ -226,6 +231,9 @@ void rave_exit()
 	}
 	free_regions();
 	//free_event_regions(); //Legacy
+	if (INST_TRACE_ENABLED) {
+		inst_trace_exit();
+	}
 	fflush(stdout);
 }
 
@@ -270,6 +278,13 @@ void rave_init(int argc, char **argv){
 	if ( world_rank!=NULL/* && alloc_threads < 4*/ ) alloc_threads += 3; //Mpi process adds two/three threads
 	mpi_size = world_rank==NULL? 1 : atoi(world_rank);
 
+	char * RAVE_INST_TRACE = getenv("RAVE_INST_TRACE_ENABLED");
+	if (RAVE_INST_TRACE != NULL && atoi(RAVE_INST_TRACE) == 1) INST_TRACE_ENABLED = 1;
+	char * RAVE_INST_NAME = getenv("RAVE_INST_TRACE_NAME");
+	if (RAVE_INST_NAME != NULL) {
+		INST_TRACE_NAME = strdup(RAVE_INST_NAME);
+	}
+
 	expected_threads = alloc_threads;
 	cpus_state = (thread_state_t*)malloc(sizeof(thread_state_t)*alloc_threads);
 
@@ -277,11 +292,22 @@ void rave_init(int argc, char **argv){
 		if (contains_string(argv[i], "TRACE_SCALAR")) TRACE_SCALAR = 1;
 		else if (contains_string(argv[i], "TRACE_ADDR")) TRACE_ADDR = 1;
 		else if (contains_string(argv[i], "TRACE_INDEXES")) TRACE_INDEXES = 1;
+		else if (contains_string(argv[i], "TRACE_EXTENDED")) TRACE_EXTENDED = 1;
+		else if (contains_string(argv[i], "INST_TRACE_ENABLED")) INST_TRACE_ENABLED = 1;
+		else if (contains_string(argv[i], "INST_TRACE_NAME")){
+			size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;
+			if (INST_TRACE_NAME) free(INST_TRACE_NAME);
+			int len = strlen(&argv[i][j+1]);
+			INST_TRACE_NAME = malloc(len+1);
+			strcpy(INST_TRACE_NAME, &argv[i][j+1]);
+		}
+		else if (contains_string(argv[i], "DEBUG_INFO")) DEBUG_INFO = 1;
 		else if (contains_string(argv[i], "PRINT_PRV")) PRINT_PRV = 1;
 		else if (contains_string(argv[i], "PRINT_LOGFILE")) PRINT_LOGFILE = 1;
 		else if (contains_string(argv[i], "PRINT_REPORT")) PRINT_REPORT = 1;
 		else if (contains_string(argv[i], "STREAM_REPORT")) STREAM_REPORT = 1;
 		else if (contains_string(argv[i], "PRINT_CSV")) PRINT_CSV = 1;
+		else if (contains_string(argv[i], "PRINT_JSON")) PRINT_JSON = 1;
 		else if (contains_string(argv[i], "PRINT_PROFILE")) PRINT_PROFILE = 1;
 		else if (contains_string(argv[i], "PRINT_CALLTRACE")) PRINT_CALLTRACE = 1;
 		else if (contains_string(argv[i], "ACCUM_REGIONS")) ACCUM_REGIONS = 1;
@@ -360,10 +386,26 @@ void rave_init(int argc, char **argv){
 				size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;
 				FD_CALLTRACE = fopen(&argv[i][j+1], "w");
 			}
+			else if (contains_string(argv[i], "JSON_NAME")){
+				size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;
+				FD_JSON = fopen(&argv[i][j+1], "w");
+			}
 			else if (contains_string(argv[i], "REGION_EVENT")){
 				size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;
 				int event = atoi(&argv[i][j+1]);
 				REGION_EVENT = event>0 ? event : REGION_EVENT;
+			}
+			else if (contains_string(argv[i], "RAW_DIST")){
+				size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;
+				RAW_DIST = atoi(&argv[i][j+1]);
+			}
+			else if (contains_string(argv[i], "WAR_DIST")){
+				size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;
+				WAR_DIST = atoi(&argv[i][j+1]);
+			}
+			else if (contains_string(argv[i], "WAW_DIST")){
+				size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;
+				WAW_DIST = atoi(&argv[i][j+1]);
 			}
 			else if (contains_string(argv[i], "BINARY_NAME")){
 				int len = strlen(argv[i]);
@@ -383,6 +425,8 @@ void rave_init(int argc, char **argv){
 				}
 			}
 		}
+		if (PRINT_CSV && FD_CSV==NULL) FD_CSV = stdout; 
+		if (PRINT_JSON && FD_JSON==NULL) FD_JSON = stdout; 
 		if (PRINT_REPORT && FD_REPORT==NULL) FD_REPORT = stdout; 
 		if (PRINT_PROFILE && FD_PROFILE==NULL) FD_PROFILE = stdout; 
 		if (PRINT_CALLTRACE && FD_CALLTRACE==NULL) FD_CALLTRACE = stdout; 
@@ -393,6 +437,10 @@ void rave_init(int argc, char **argv){
 			trace_row(FD_PRV, 0, 0, SCALAR_ROW, 0);
 			trace_event_value(FD_PRV,event_VLEN,RAVE_VLMAX);
 			trace_event_value(FD_PRV,event_ELEN,RAVE_ELEN);
+		}
+
+		if (INST_TRACE_ENABLED){
+			inst_trace_init();
 		}
 
 		rave_ini_regions();
@@ -407,4 +455,3 @@ void rave_init(int argc, char **argv){
 
 		/* Register translation block and exit callbacks */
 	}
-

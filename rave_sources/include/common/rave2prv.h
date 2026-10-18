@@ -40,6 +40,10 @@ void set_pipelines(int N);
 void trace_row(FILE * fd, int process, int cpu, int pipeline, uint64_t tstamp);
 void trace_event_value(FILE * fd, int event, uint64_t value);
 int reg2prv(char * r);
+int reg2id(const char * reg_name);
+static inline int valid_reg_id(int reg_id){
+	return reg_id >= 0 && reg_id < 96;
+}
 void open_file(FILE **fd, char * name);
 void write_prv(FILE * fd, int procs, int * OMPthreads, int pipelines);
 void write_row(FILE * fd, int procs, int * OMPthreads, int pipelines);

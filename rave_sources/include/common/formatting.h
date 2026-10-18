@@ -73,3 +73,31 @@ char * indent_add(int is_last);
 char * indent_sub(int howmany, int is_last);
 char * indent_none(int is_last);
 void indent(FILE * fd, int level, int is_last);
+
+/* -------------------------------------------------------------------------- */
+/* Minimal JSON writer helpers (used by the `rave --json <file>` output).      */
+/* Pretty printed: one member per line with 2-space nesting.                   */
+/* Every member helper takes a `first` flag so the caller does not need to     */
+/* know whether it is emitting the first member of an object/array:            */
+/*   int first = 1;                                                            */
+/*   json_obj_open(fd, &first, "counters");  ...  json_obj_close(fd);          */
+/* Nesting is tracked internally: use json_push()/json_pop() when a brace is   */
+/* written by hand (e.g. around a nested print_*_json() call) and json_elem()  */
+/* to separate the elements of an array.                                       */
+/* -------------------------------------------------------------------------- */
+void json_reset(void);
+void json_push(void);
+void json_pop(void);
+void json_indent(FILE * fd);
+void json_elem(FILE * fd, int * first);
+void json_sep(FILE * fd, int * first);
+void json_obj_open(FILE * fd, int * first, const char * key);
+void json_obj_close(FILE * fd);
+void json_arr_open(FILE * fd, int * first, const char * key);
+void json_arr_close(FILE * fd);
+void json_num(FILE * fd, int * first, const char * key, double value);
+void json_int(FILE * fd, int * first, const char * key, double value);
+void json_bool(FILE * fd, int * first, const char * key, int value);
+void json_key_only(FILE * fd, int * first, const char * key);
+void json_str(FILE * fd, int * first, const char * key, const char * value);
+void json_escape(FILE * fd, const char * s);

@@ -8,3 +8,5 @@
 *.trace
 downloads
 build
+__pycache__/
+*.pyc

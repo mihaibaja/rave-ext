@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include "counters_generic.h"
 #include "utils.h"
+#include <string.h>
 
 uint64_t timestamp;
 //QEMU_PLUGIN_EXPORT int qemu_plugin_version;
@@ -36,6 +37,14 @@ int REGION_EVENT = 1000;
 char STREAM_REPORT = 0;
 char TRACE_ADDR = 0;
 char TRACE_SCALAR = 0;
+char TRACE_EXTENDED = 0;
+char INST_TRACE_ENABLED = 0;
+char * INST_TRACE_NAME = NULL;
+FILE * FD_INST_TRACE = NULL;
+char DEBUG_INFO = 0;
+int RAW_DIST = 8;
+int WAR_DIST = 20;
+int WAW_DIST = 8;
 uint64_t base;
 int disabled_once = 0;
 uint64_t timestamp;
@@ -44,11 +53,13 @@ int COMPRESS_REPORT=0;
 int PROFILE_WEIGHT=w_ELEMS;
 char PRINT_REPORT = 0;
 char PRINT_CSV = 0;
+char PRINT_JSON = 0;
 char * filename = NULL; 
 char * BINARY_NAME = NULL;
 FILE * FD_PCF;
 FILE * FD_ROW;
 FILE * FD_CSV;
+FILE * FD_JSON;
 FILE * FD_COMM;
 FILE * FD_PROFILE;
 FILE * FD_CALLTRACE;
@@ -128,6 +139,10 @@ void reset_thread(int cpu_index){
 	state -> rave_event_number=-1;
 	state -> rave_value_number=-1;
 	reset_counters(&(state->accum_counters));
+	memset(state->write_reg_deps, 0, sizeof(state->write_reg_deps));
+	memset(state->read_reg_deps, 0, sizeof(state->read_reg_deps));
+	memset(state->inst_trace_last_write, 0, sizeof(state->inst_trace_last_write));
+	memset(state->inst_trace_last_read, 0, sizeof(state->inst_trace_last_read));
 	
 	//Musa:
 	state -> prev_dst = 0;

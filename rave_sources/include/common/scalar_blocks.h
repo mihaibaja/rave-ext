@@ -18,6 +18,10 @@ struct scalar_block_data_t{
 	int moved_bytes;
 	int flops;
 	char ** strings;
+    // To keep track of dependencies
+    int * dst_d;
+    int * src1_d;
+    int * src2_d;
 };
 typedef struct scalar_block_data_t scalar_block_data_t;
 

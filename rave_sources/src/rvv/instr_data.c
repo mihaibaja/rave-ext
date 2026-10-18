@@ -10,6 +10,7 @@
 #include "utils.h" //For contains_string(char*)
 #include "rave2prv.h"
 #include "instr2prv.h"
+#include "state.h"
 
 int64_t get_loop_offset(uint32_t insn_opcode){
 	int64_t offset;
@@ -169,6 +170,209 @@ int16_t instr_set_vector_type(uint32_t insn_opcode){
 				return (type | subtype | subsubtype | subsubsubtype);
 }
 
+/** Important aclarations:
+ * - The fields are combined using bitwise OR operations.
+ * - This only takes into account RVV 1.0 especification, thus, RVV 0.7 results may be wrong.
+ * - To distinguish between some instructions, e.g. narrowing and widening we need to bring the asm string, i.e.,
+ *   we don't allways use the opcode to determine the type_ext.
+ * - We use cur_type to extend memory decoding without decoding everything that has just been decoded.
+ */
+uint16_t instr_set_vector_type_ext(uint32_t insn_opcode, char* instr_asm, uint16_t cur_type){
+    int opcode = get_bit_field(insn_opcode,6,0); 
+    int funct6,funct3, vm, vs1, mop;
+    unsigned int nf;
+    uint16_t type_ext = 0x0000;
+
+    switch(opcode){
+        case MAJOR_ARITH:
+            type_ext |= TYPE_EXT_ARITH;  
+            funct3 = get_bit_field(insn_opcode,14,12);
+            funct6 = get_bit_field(insn_opcode,31,26);
+            vs1 = get_bit_field(insn_opcode, 19, 15);
+            vm  = get_bit_field(insn_opcode, 25, 25);
+
+            /** NARROWING & WIDENING INSTRUCTIONS */
+            if(instr_asm[0] == 'v' && (instr_asm[1] == 'n' || (instr_asm[1] == 'f' && instr_asm[2] == 'n'))){       // Narrowing
+
+                type_ext |= TYPE_EXT_ARITH_NARROWING;
+
+            }else if(instr_asm[0] == 'v' && (instr_asm[1] == 'w' || (instr_asm[1] == 'f' && instr_asm[2] == 'w'))){ // Widening
+
+                type_ext |= TYPE_EXT_ARITH_WIDENING;
+
+            }else{
+
+                type_ext |= TYPE_EXT_ARITH_NORMAL;
+
+            }
+
+            /** FUSED INSTRUCTIONS */
+            if (strstr(instr_asm, "macc") || strstr(instr_asm, "madd") || 
+                strstr(instr_asm, "msac") || strstr(instr_asm, "msub")) {
+                
+                type_ext |= TYPE_EXT_ARITH_COMP_FUSED;
+                if (instr_asm[0] == 'v' && instr_asm[1] == 'f') {
+                    type_ext |= TYPE_EXT_FP;
+                }
+                
+            } else {
+                // By default we set the instruction as Computation, e.g. add, sub...
+                type_ext |= TYPE_EXT_ARITH_COMPUTATION;
+                if (instr_asm[0] == 'v' && instr_asm[1] == 'f') {
+                    type_ext |= TYPE_EXT_FP;
+                }
+            }
+
+            // To check whether the instruction reads from a scalar reg       
+            if (funct3 > 3 && funct3 < 7) {
+                type_ext |= TYPE_EXT_READ_SCALAR;
+            }
+
+            /** MOVE INSTRUCTIONS */
+            if(funct6 == 0x10){
+                if ((funct3 == 2 || funct3 == 1) && vs1 == 0) {                         // vmv.x.s, vfmv.f.s
+                    type_ext     &= ~MASK_EXT_SUBSUBTYPE;
+                    type_ext |= TYPE_EXT_ARITH_MOVE; 
+                    type_ext |= TYPE_EXT_WRITE_SCALAR;
+                    type_ext |= (funct3==1)?TYPE_EXT_FP:TYPE_EXT_INT;
+
+                } else if ((funct3 == 2 || funct3 == 1) && (vs1 == 16 || vs1 == 17)) {  // vcpop.m y vfirst.m
+                    type_ext     &= ~MASK_EXT_SUBSUBTYPE;   
+                    type_ext |= TYPE_EXT_ARITH_MASK;
+                    type_ext |= TYPE_EXT_WRITE_SCALAR;
+                    type_ext |= TYPE_EXT_INT;
+
+                }
+                else if(funct3 == 6 || funct3 == 5){                                    // vmv.s.x, vfmv.s.f
+                    type_ext     &= ~MASK_EXT_SUBSUBTYPE;
+                    type_ext |= TYPE_EXT_ARITH_MOVE; 
+                    type_ext |= (funct3==5)?TYPE_EXT_FP:TYPE_EXT_INT;
+                }
+
+            } else if(funct6 == 0x27 && funct3 == 3){                 // vmv1r.v, vmv2r.v... Whole register...
+                type_ext     &= ~MASK_EXT_SUBSUBTYPE;
+                type_ext     |= TYPE_EXT_ARITH_MOVE;
+                type_ext     |= TYPE_EXT_WHOLE_REGISTER;
+                type_ext     |= TYPE_EXT_INT;
+            } else if(funct6 == 0x17 && vm == 1) {                    // vmv.v.v, vmv.v.x, vfmv.v.f
+                type_ext     &= ~MASK_EXT_SUBSUBTYPE;
+                type_ext     |= TYPE_EXT_ARITH_MOVE;
+                if (funct3 == 1 || funct3 == 5) {
+                    type_ext |= TYPE_EXT_FP;                          // vfmv.v.f
+                } else {
+                    type_ext |= TYPE_EXT_INT;                         // vmv.v.v, vmv.v.x, vmv.v.i
+                }
+            }
+
+            /** REDUCTION INSTRUCTIONS */
+            if (funct3 == 2 && ((funct6 >= 0 && funct6 <= 7) || funct6 == 0x30 || funct6 == 0x31)) {   
+                /**OPMVV: 010 
+                 * f6 == 0x30 y 0x31: vwredsumu y vwredsum
+                 * others: vredsum, vredand, vredor, vredxor, vredminu, vredmin, vredmaxu, vredmax
+                */
+                type_ext &= ~MASK_EXT_SUBSUBTYPE;
+                type_ext |= TYPE_EXT_ARITH_REDUCTION;
+                type_ext |= TYPE_EXT_INT;     
+            } else if (funct3 == 1 &&
+                ((funct6%2 == 1 && funct6 > 0 && funct6 < 8) || funct6 == 0x31 || funct6 == 0x33)) {   
+                /**OPFVV: 001
+                 * f6 == 0x31 y 0x33: vfwredsumu y vfwredsum
+                 * others: vfredosum, vfredusum, vfredmin, vfredmax
+                */
+                type_ext &= ~MASK_EXT_SUBSUBTYPE;
+                type_ext |= TYPE_EXT_ARITH_REDUCTION;
+                type_ext |= TYPE_EXT_FP;     
+            } 
+
+            /** SLIDE INSTRUCTIONS */
+            else if (funct6 == 14 || funct6 == 15) {   
+                type_ext |= (funct6 == 14)?TYPE_EXT_SLIDE_UP:TYPE_EXT_SLIDE_DOWN; // funct6 == 14: slideup; else slidedown
+
+                if(funct3 == 0b100 || funct3 == 0b011){ // vslideup, vslidedown
+                    type_ext &= ~MASK_EXT_SUBSUBTYPE;
+                    type_ext |= TYPE_EXT_ARITH_SLIDE;
+                    type_ext |= TYPE_EXT_INT;
+                    type_ext |= TYPE_EXT_SLIDE_N1;
+                }else if(funct3 == 0b110){              // vslide1up, vslide1down
+                    type_ext &= ~MASK_EXT_SUBSUBTYPE;
+                    type_ext |= TYPE_EXT_ARITH_SLIDE;
+                    type_ext |= TYPE_EXT_INT;
+                    type_ext |= TYPE_EXT_SLIDE_1;
+                }else if(funct3 == 0b101){              // vfslide1up, vfslide1down
+                    type_ext &= ~MASK_EXT_SUBSUBTYPE;
+                    type_ext |= TYPE_EXT_ARITH_SLIDE;
+                    type_ext |= TYPE_EXT_FP;
+                    type_ext |= TYPE_EXT_SLIDE_1;
+                }
+            }
+
+            /** COMPRESS INSTRUCTIONS */
+            if (funct6 == 0b010111 && funct3 == 0b010) {
+                type_ext &= ~MASK_EXT_SUBSUBTYPE;
+                type_ext |= TYPE_EXT_ARITH_COMPRESS;
+                type_ext |= TYPE_EXT_INT;
+            }
+
+            /** GATHER INSTRUCTIONS */
+            else if(funct6 == 0b001100 && (funct3 == 0b000 || funct3 == 0b011 || funct3 == 0b100)){  // vrgather
+                type_ext &= ~MASK_EXT_SUBSUBTYPE;
+                type_ext |= TYPE_EXT_ARITH_GATHER;
+                type_ext |= TYPE_EXT_INT;
+            } else if(funct6 == 0b001110 && funct3 == 0b000){                                    // vrgatherei16
+                type_ext &= ~MASK_EXT_SUBSUBTYPE;
+                type_ext |= TYPE_EXT_ARITH_GATHER;
+                type_ext |= TYPE_EXT_INT;
+            }
+
+            /** MASKED INSTRUCTIONS */
+            if(!(insn_opcode>>25 & 0x1)) {
+                type_ext |= TYPE_EXT_MASKED;
+            }
+
+            break;
+
+        case MAJOR_LOAD:
+            type_ext |= TYPE_EXT_LOAD;
+			nf = (insn_opcode >> 29) & 0x7;
+            if(nf > 0) {
+                type_ext |= TYPE_EXT_MEMORY_SEGMENTED;
+            }
+            if(is_subsubtype(cur_type, T_INDEX)){
+                mop = get_bit_field(insn_opcode,28,26);
+                if(mop == 3) type_ext |= TYPE_EXT_MEMORY_ORDERED;
+                else       type_ext |= TYPE_EXT_MEMORY_UNORDERED; // I know that as its 000 we dont need to do this but to be more explicit I prefer to.
+            }
+
+            /** MASKED INSTRUCTIONS */
+            if(!(insn_opcode>>25 & 0x1)) {
+                type_ext |= TYPE_EXT_MASKED;
+            }
+ 
+            break;
+
+        case MAJOR_STORE:
+            type_ext |= TYPE_EXT_STORE;	
+			nf = (insn_opcode >> 29) & 0x7;
+            if(nf > 0) {
+                type_ext |= TYPE_EXT_MEMORY_SEGMENTED;
+            }	
+            if(is_subsubtype(cur_type, T_INDEX)){
+                mop = get_bit_field(insn_opcode,28,26);
+                if(mop == 3) type_ext |= TYPE_EXT_MEMORY_ORDERED;
+                else       type_ext |= TYPE_EXT_MEMORY_UNORDERED; // I know that as its 000 we dont need to do this but to be more explicit I prefer to.
+                
+            }
+            
+            /** MASKED INSTRUCTIONS */
+            if(!(insn_opcode>>25 & 0x1)) {
+                type_ext |= TYPE_EXT_MASKED;
+            }
+ 
+            break;
+    }
+    return type_ext;
+}
+
 uint16_t instr_set_scalar_type(uint32_t insn_opcode){
 
 	uint16_t type = T_SCALAR;
@@ -262,22 +466,35 @@ instr_data * fill_instr_struct(uint64_t pc, char * instr, uint32_t insn_opcode, 
 	data -> src2 = (field_idx > 3) ? reg2prv(instr_fields[3]) : 0;
 	data -> src3 = -1;
 
+	data -> dst_d  =  (field_idx > 1) ? reg2id(instr_fields[1]) : 0;
+	data -> src1_d = (field_idx > 2) ? reg2id(instr_fields[2]) : 0; 
+	data -> src2_d = (field_idx > 3) ? reg2id(instr_fields[3]) : 0;
+	data -> src3_d = -1;
+
+	data -> vinstr_idx = -1;   // Solo las instrucciones vectoriales tienen contador propio
+
 	if (contains_string(instr_fields[0], "vset")){
 		data -> type = T_VSETVL;
+		data -> vinstr_idx = rave_vinstr_lookup(instr_fields[0]);
 		if (prv_print) data -> paraver_code = instr2prv(insn_opcode);
 	}else if (instr_fields[0][0]=='v'){
 		data -> type = instr_set_vector_type(insn_opcode);
+        data -> type_ext = instr_set_vector_type_ext(insn_opcode, instr_fields[0], data -> type);
+		data -> vinstr_idx = rave_vinstr_lookup(instr_fields[0]);
 
 		if (is_subtype(data->type, T_STORE)){
 			//change it back to "memory" (general)
 			data -> type &= ~T_STORE; 
 			data -> type |= T_MEMORY;
 			data -> src3 = data -> dst;
+			data -> src3_d = data -> dst_d;
+            data -> dst_d = -1;
 			//data -> dst = 0;
 		}
 		if (is_subtype(data->type, T_ARITH)){
 			if (is_subsubsubtype(data->type, T_FUSED)){
 				data -> src3 = data -> dst;
+                data -> src3_d = data -> dst_d;
 			}
 		}
 		if (prv_print) data -> paraver_code = instr2prv(insn_opcode);

@@ -14,6 +14,7 @@
 #include "instr_data.h"
 #include "utils.h"
 #include "profiling.h"
+#include "rave2prv.h"
 #ifdef RVV_07
 #include "07_decode.h"
 #endif
@@ -97,6 +98,34 @@ void vcpu_disable_trace(unsigned int cpu_index, void *udata){
 	disable_trace(cpu_index);
 }
 
+static void scalar_register_ids(const char *insn_disas, int *dst, int *src1, int *src2){
+	char *disas_copy = NULL;
+	char *field;
+	char *saveptr = NULL;
+	int field_idx = 0;
+
+	*dst = -1;
+	*src1 = -1;
+	*src2 = -1;
+    disas_copy = (char *)malloc(strlen(insn_disas) + 1);
+	my_strcpy(disas_copy, insn_disas);
+
+	for (field = strtok_r(disas_copy, " ,\"()", &saveptr);
+		 field != NULL;
+		 field = strtok_r(NULL, " ,\"()", &saveptr)) {
+		if (field_idx == 1) *dst = reg2id(field);
+		else if (field_idx == 2) *src1 = reg2id(field);
+		else if (field_idx == 3) {
+			*src2 = reg2id(field);
+			break;
+		}
+		field_idx++;
+	}
+
+	free(disas_copy);
+}
+
+
 
 QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 void plugin_exit(qemu_plugin_id_t id, void *p)
@@ -165,7 +194,7 @@ void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 
 	size_t n = qemu_plugin_tb_n_insns(tb);
 
-	if (!PRINT_PRV && !PRINT_LOGFILE && !PRINT_REPORT && !PRINT_CSV && !PRINT_PROFILE){
+	if (!PRINT_PRV && !PRINT_LOGFILE && !PRINT_REPORT && !PRINT_CSV && !PRINT_PROFILE && !PRINT_JSON && !INST_TRACE_ENABLED){
 		return;
 	}
 
@@ -216,15 +245,22 @@ void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 			scalar_block_start = i+1;
 		}else{ //Scalar
 			if (scalar_block_start == i){
-				int save_pcs = (PRINT_PROFILE) ? (n-i) : 1 ;
+				int save_pcs = (PRINT_PROFILE || (INST_TRACE_ENABLED && TRACE_SCALAR)) ? (n-i) : 1 ;
 				scalar_block_data = alloc_scalar_block(save_pcs); 
-				if (TRACE_SCALAR){
+				if (TRACE_SCALAR || TRACE_EXTENDED || INST_TRACE_ENABLED){
 					scalar_block_data->strings = (char**)malloc(sizeof(char*)*(n-i));
+                    scalar_block_data->dst_d = (int*)malloc(sizeof(int)*(n-i));
+                    scalar_block_data->src1_d = (int*)malloc(sizeof(int)*(n-i));
+                    scalar_block_data->src2_d = (int*)malloc(sizeof(int)*(n-i));
 				}
 			}
-			if (scalar_block_start == i || PRINT_PROFILE)scalar_block_data->PCs[i-scalar_block_start] = insn_vaddr; 
-			if (TRACE_SCALAR){
+			if (scalar_block_start == i || PRINT_PROFILE || (INST_TRACE_ENABLED && TRACE_SCALAR)) scalar_block_data->PCs[i-scalar_block_start] = insn_vaddr; 
+			if (TRACE_SCALAR || TRACE_EXTENDED || INST_TRACE_ENABLED){
 				my_strcpy(scalar_block_data->strings[i-scalar_block_start], insn_disas); 
+                scalar_register_ids(insn_disas,
+					&scalar_block_data->dst_d[i-scalar_block_start],
+					&scalar_block_data->src1_d[i-scalar_block_start],
+					&scalar_block_data->src2_d[i-scalar_block_start]);
 			}
 			//printf("%d/%ld → %s\n",i,n,insn_disas);
 			rolling_scalar_block(insn_opcode, insn_vaddr, scalar_block_data);
@@ -239,4 +275,3 @@ void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 	num_trans++;
 #endif
 }
-

@@ -122,6 +122,43 @@ int reg2prv(char * r){
 	return 0;
 }
 
+int reg2id(const char * r){
+	static const char * scalar_names[32] = {
+		"zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2",
+		"s0", "s1", "a0", "a1", "a2", "a3", "a4", "a5",
+		"a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7",
+		"s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6"
+	};
+	static const char * float_names[32] = {
+		"ft0", "ft1", "ft2", "ft3", "ft4", "ft5", "ft6", "ft7",
+		"fs0", "fs1", "fa0", "fa1", "fa2", "fa3", "fa4", "fa5",
+		"fa6", "fa7", "fs2", "fs3", "fs4", "fs5", "fs6", "fs7",
+		"fs8", "fs9", "fs10", "fs11", "ft8", "ft9", "ft10", "ft11"
+	};
+	char * end;
+	long index;
+
+	if (r == NULL) return -1;
+	if (r[0] == 'v') {
+		index = strtol(r + 1, &end, 10);
+		return (*end == '\0' && index >= 0 && index < 32) ? RAVE_INI_REG_V + index : -1;
+	}
+	if (r[0] == 'x') {
+		index = strtol(r + 1, &end, 10);
+		return (*end == '\0' && index >= 0 && index < 32) ? RAVE_INI_REG_S + index : -1;
+	}
+	if (r[0] == 'f') {
+		index = strtol(r + 1, &end, 10);
+		return (*end == '\0' && index >= 0 && index < 32) ? RAVE_INI_REG_F + index : -1;
+	}
+	for (index = 0; index < 32; ++index) {
+		if (strcmp(r, scalar_names[index]) == 0) return RAVE_INI_REG_S + index;
+		if (strcmp(r, float_names[index]) == 0) return RAVE_INI_REG_F + index;
+	}
+	if (strcmp(r, "fp") == 0) return RAVE_INI_REG_S + 8;
+	return -1;
+}
+
 void open_file(FILE **fd, char * name){
 	*fd = fopen(name, "w+");
 	if (*fd == NULL){
