@@ -158,7 +158,7 @@ void print_counters_human(FILE * fd, rave_counters * counters){
                     fprintf(fd, "[avg VL: "); P_VL(fd, "%.2f", counters->velem_arith[s] / totvarith); fprintf(fd," elems]\n");
                     indent(fd,++level,0); fprintf(fd,"FP: "); P_NUMBER(fd,"%.0f", counters->vfp_instr[s]); PERCENTAGE(fd,counters->vfp_instr[s], totvarith,'\n');
                     indent(fd,  level,0); fprintf(fd,"INT: "); P_NUMBER(fd,"%.0f", counters->vint_instr[s]); PERCENTAGE(fd,counters->vint_instr[s], totvarith,'\n');
-                    indent(fd,  level,0); fprintf(fd,"Masked: "); P_NUMBER(fd,"%.0f", counters->vmasked_instr[1][s]); PERCENTAGE(fd,counters->vmasked_instr[0][s], totvarith,'\n');
+                    indent(fd,  level,0); fprintf(fd,"Masked: "); P_NUMBER(fd,"%.0f", counters->vmasked_instr[1][s]); PERCENTAGE(fd,counters->vmasked_instr[1][s], totvarith,'\n');
                     if(counters->vmasked_instr[1][s] > 0){
                         double n = (double)counters->vmasked_instr[1][s];
                         double avg_density = (double)counters->vmasked_disp[1][s] / n;
@@ -238,7 +238,7 @@ void print_counters_human(FILE * fd, rave_counters * counters){
                 indent(fd,level,1); fprintf(fd,"Memory: "); P_NUMBER(fd,"%.0f", totvmem); PERCENTAGE(fd,totvmem, counters->vector_instr[s], totvmem>0?' ':'\n');
                 if (totvmem>0){
                     fprintf(fd, "[avg VL: "); P_VL(fd,"%.2f",counters->velem_mem[s] / totvmem); fprintf(fd," elems]\n");
-                    indent(fd,++level,0); fprintf(fd,"Masked: "); P_NUMBER(fd,"%.0f", counters->vmasked_instr[0][s]); PERCENTAGE(fd,counters->vmasked_instr[0][s], totvarith,'\n');
+                    indent(fd,++level,0); fprintf(fd,"Masked: "); P_NUMBER(fd,"%.0f", counters->vmasked_instr[0][s]); PERCENTAGE(fd,counters->vmasked_instr[0][s], totvmem,'\n');
                     if(counters->vmasked_instr[0][s] > 0){
                         double n = (double)counters->vmasked_instr[0][s];
                         double avg_density = (double)counters->vmasked_disp[0][s] / n;

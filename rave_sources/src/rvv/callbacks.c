@@ -645,7 +645,9 @@ void insn_exec(thread_state_t * state, instr_data * instr){
             if(is_type_ext(instr->type_ext, MASK_EXT_BASE, TYPE_EXT_ARITH)){
                 if(is_type_ext(instr->type_ext, TYPE_EXT_MASKED, TYPE_EXT_MASKED)){
                     state->accum_counters.vmasked_instr[1][sew]++;
-                    int num_1s = count_1s(get_vreg(state,0,effective_vl), effective_vl/real_sew_bits);
+                    char * mask = get_vreg(state,0,effective_vl);
+                    int num_1s = count_1s(mask, effective_vl/real_sew_bits);
+                    free(mask);
                     state->accum_counters.vmasked_disp[1][sew] += (num_1s/(effective_vl/real_sew_bits));
                     state->accum_counters.vmasked_disp_squared[1][sew] += (num_1s/(effective_vl/real_sew_bits))*(num_1s/(effective_vl/real_sew_bits));
                 }
@@ -725,7 +727,9 @@ void insn_exec(thread_state_t * state, instr_data * instr){
             }else if (is_subtype(instr->type, T_MEMORY)){ // We'll be using type for memory counters.
                 if(is_type_ext(instr->type_ext, TYPE_EXT_MASKED, TYPE_EXT_MASKED)){
                     state->accum_counters.vmasked_instr[0][sew]++;
-                    int num_1s = count_1s(get_vreg(state,0,effective_vl), effective_vl/real_sew_bits);
+                    char * mask = get_vreg(state,0,effective_vl);
+                    int num_1s = count_1s(mask, effective_vl/real_sew_bits);
+                    free(mask);
                     state->accum_counters.vmasked_disp[0][sew] += num_1s/(effective_vl/real_sew_bits);
                     state->accum_counters.vmasked_disp_squared[0][sew] += (num_1s/(effective_vl/real_sew_bits))*(num_1s/(effective_vl/real_sew_bits));
                 }
