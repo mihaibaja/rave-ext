@@ -158,6 +158,18 @@ void print_counters_human(FILE * fd, rave_counters * counters){
                     fprintf(fd, "[avg VL: "); P_VL(fd, "%.2f", counters->velem_arith[s] / totvarith); fprintf(fd," elems]\n");
                     indent(fd,++level,0); fprintf(fd,"FP: "); P_NUMBER(fd,"%.0f", counters->vfp_instr[s]); PERCENTAGE(fd,counters->vfp_instr[s], totvarith,'\n');
                     indent(fd,  level,0); fprintf(fd,"INT: "); P_NUMBER(fd,"%.0f", counters->vint_instr[s]); PERCENTAGE(fd,counters->vint_instr[s], totvarith,'\n');
+                    indent(fd,  level,0); fprintf(fd,"Masked: "); P_NUMBER(fd,"%.0f", counters->vmasked_instr[1][s]); PERCENTAGE(fd,counters->vmasked_instr[0][s], totvarith,'\n');
+                    if(counters->vmasked_instr[1][s] > 0){
+                        double n = (double)counters->vmasked_instr[1][s];
+                        double avg_density = (double)counters->vmasked_disp[1][s] / n;
+                        double mean_sq = (double)counters->vmasked_disp_squared[1][s] / n;
+                        double variance = mean_sq - (avg_density * avg_density);
+                        double std_dev = sqrt(fmax(0.0, variance));
+                        
+                        indent(fd, ++level, 0); fprintf(fd, "Avg. density: "); P_NUMBER(fd, "%.2f", avg_density); fprintf(fd, "\n");
+                        indent(fd,   level, 1); fprintf(fd, "Std. Dev. density: "); P_NUMBER(fd, "%.2f", std_dev); fprintf(fd, "\n");
+                        --level;
+                    }
                     indent(fd,  level,0); fprintf(fd,"Types:\n");
                     indent(fd,++level,0); fprintf(fd,"Narrowing: "); P_NUMBER(fd,"%.0f", counters->vnarrowing_instr[s]); PERCENTAGE(fd,counters->vnarrowing_instr[s], totvarith,'\n');
                     indent(fd,  level,0); fprintf(fd,"Widening: "); P_NUMBER(fd,"%.0f", counters->vwidening_instr[s]); PERCENTAGE(fd,counters->vwidening_instr[s], totvarith,'\n');
@@ -226,7 +238,19 @@ void print_counters_human(FILE * fd, rave_counters * counters){
                 indent(fd,level,1); fprintf(fd,"Memory: "); P_NUMBER(fd,"%.0f", totvmem); PERCENTAGE(fd,totvmem, counters->vector_instr[s], totvmem>0?' ':'\n');
                 if (totvmem>0){
                     fprintf(fd, "[avg VL: "); P_VL(fd,"%.2f",counters->velem_mem[s] / totvmem); fprintf(fd," elems]\n");
-                    indent(fd,++level,0); fprintf(fd,"unit: "); P_NUMBER(fd,"%.0f", counters->vunit_instr[s]); PERCENTAGE(fd,counters->vunit_instr[s], totvmem,'\n');
+                    indent(fd,++level,0); fprintf(fd,"Masked: "); P_NUMBER(fd,"%.0f", counters->vmasked_instr[0][s]); PERCENTAGE(fd,counters->vmasked_instr[0][s], totvarith,'\n');
+                    if(counters->vmasked_instr[0][s] > 0){
+                        double n = (double)counters->vmasked_instr[0][s];
+                        double avg_density = (double)counters->vmasked_disp[0][s] / n;
+                        double mean_sq = (double)counters->vmasked_disp_squared[0][s] / n;
+                        double variance = mean_sq - (avg_density * avg_density);
+                        double std_dev = sqrt(fmax(0.0, variance));
+                        
+                        indent(fd, ++level, 0); fprintf(fd, "Avg. density: "); P_NUMBER(fd, "%.2f", avg_density); fprintf(fd, "\n");
+                        indent(fd,   level, 1); fprintf(fd, "Std. Dev. density: "); P_NUMBER(fd, "%.2f", std_dev); fprintf(fd, "\n");
+                        --level;
+                    }
+                    indent(fd,  level,0); fprintf(fd,"unit: "); P_NUMBER(fd,"%.0f", counters->vunit_instr[s]); PERCENTAGE(fd,counters->vunit_instr[s], totvmem,'\n');
                     if(counters->vseg_instr_unit[s] > 0) {
                         indent(fd,++level,1); fprintf(fd,"Segmented: "); P_NUMBER(fd,"%.0f", counters->vseg_instr_unit[s]); PERCENTAGE(fd,counters->vseg_instr_unit[s], counters->vunit_instr[s],'\n');
                         --level;

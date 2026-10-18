@@ -71,6 +71,10 @@ struct rave_counters{
                 double vcomputation_instr[SEWS];
                 double vwfused_instr[SEWS];
                 double vfused_instr[SEWS];
+                /**Masked instructions */
+                double vmasked_instr[2][SEWS];         // Divided into 2 cat: L/S & arith.
+                double vmasked_disp[2][SEWS];          // To track accumulates & thus be able after to tell the average.
+                double vmasked_disp_squared[2][SEWS];  // To be able to tell the variance of the average.
 
 				//Reductions
 				double velem_reductions[SEWS];

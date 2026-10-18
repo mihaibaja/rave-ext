@@ -323,6 +323,12 @@ uint16_t instr_set_vector_type_ext(uint32_t insn_opcode, char* instr_asm, uint16
                 type_ext |= TYPE_EXT_ARITH_GATHER;
                 type_ext |= TYPE_EXT_INT;
             }
+
+            /** MASKED INSTRUCTIONS */
+            if(!(insn_opcode>>25 & 0x1)) {
+                type_ext |= TYPE_EXT_MASKED;
+            }
+
             break;
 
         case MAJOR_LOAD:
@@ -335,6 +341,11 @@ uint16_t instr_set_vector_type_ext(uint32_t insn_opcode, char* instr_asm, uint16
                 mop = get_bit_field(insn_opcode,28,26);
                 if(mop == 3) type_ext |= TYPE_EXT_MEMORY_ORDERED;
                 else       type_ext |= TYPE_EXT_MEMORY_UNORDERED; // I know that as its 000 we dont need to do this but to be more explicit I prefer to.
+            }
+
+            /** MASKED INSTRUCTIONS */
+            if(!(insn_opcode>>25 & 0x1)) {
+                type_ext |= TYPE_EXT_MASKED;
             }
  
             break;
@@ -350,6 +361,11 @@ uint16_t instr_set_vector_type_ext(uint32_t insn_opcode, char* instr_asm, uint16
                 if(mop == 3) type_ext |= TYPE_EXT_MEMORY_ORDERED;
                 else       type_ext |= TYPE_EXT_MEMORY_UNORDERED; // I know that as its 000 we dont need to do this but to be more explicit I prefer to.
                 
+            }
+            
+            /** MASKED INSTRUCTIONS */
+            if(!(insn_opcode>>25 & 0x1)) {
+                type_ext |= TYPE_EXT_MASKED;
             }
  
             break;

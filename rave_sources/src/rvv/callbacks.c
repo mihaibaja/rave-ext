@@ -253,6 +253,19 @@ void rolling_scalar_block(uint32_t opcode, uint64_t PC, scalar_block_data_t * da
 		++data->instr;
 }
 
+inline int count_1s(char * reg, int vlB){
+    int i = 0, contador = 0;
+    bool terminado = false;
+    while(i*8 < vlB && !terminado){
+        for(int j = 0; j < 8 && !terminado; j++){
+            contador += ((reg[i]>>j)&0x1)?1:0;
+            if(i*8+j+1 >= vlB) terminado = true;
+        }
+        i++;
+    }
+    return contador;
+}
+
 //Vector and vsetvli instructions
 void insn_exec(thread_state_t * state, instr_data * instr){
 
@@ -630,6 +643,12 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 
             // Extended type counters.
             if(is_type_ext(instr->type_ext, MASK_EXT_BASE, TYPE_EXT_ARITH)){
+                if(is_type_ext(instr->type_ext, TYPE_EXT_MASKED, TYPE_EXT_MASKED)){
+                    state->accum_counters.vmasked_instr[1][sew]++;
+                    int num_1s = count_1s(get_vreg(state,0,effective_vl), effective_vl/real_sew_bits);
+                    state->accum_counters.vmasked_disp[1][sew] += (num_1s/(effective_vl/real_sew_bits));
+                    state->accum_counters.vmasked_disp_squared[1][sew] += (num_1s/(effective_vl/real_sew_bits))*(num_1s/(effective_vl/real_sew_bits));
+                }
                 state->accum_counters.velem_arith[sew] += vl; 
                 if(is_type_ext(instr->type_ext, TYPE_EXT_FP, TYPE_EXT_FP)){
                     ++state->accum_counters.vfp_instr[sew];
@@ -704,6 +723,12 @@ void insn_exec(thread_state_t * state, instr_data * instr){
                 }
 
             }else if (is_subtype(instr->type, T_MEMORY)){ // We'll be using type for memory counters.
+                if(is_type_ext(instr->type_ext, TYPE_EXT_MASKED, TYPE_EXT_MASKED)){
+                    state->accum_counters.vmasked_instr[0][sew]++;
+                    int num_1s = count_1s(get_vreg(state,0,effective_vl), effective_vl/real_sew_bits);
+                    state->accum_counters.vmasked_disp[0][sew] += num_1s/(effective_vl/real_sew_bits);
+                    state->accum_counters.vmasked_disp_squared[0][sew] += (num_1s/(effective_vl/real_sew_bits))*(num_1s/(effective_vl/real_sew_bits));
+                }
                 state->accum_counters.moved_bytes_v += vl*(1<<(sew));
                 state->accum_counters.velem_mem[sew] += vl;
                 if (is_subsubtype(instr->type, T_UNIT)) {
