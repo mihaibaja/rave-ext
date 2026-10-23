@@ -10,6 +10,9 @@
     "vlen_bits",
     "trace_extended",
     "accumulate_regions",
+    "RAW_DIST",
+    "WAW_DIST",
+    "WAR_DIST",
     "region_count",
     "regions"
   ],
@@ -32,6 +35,15 @@
     "trace_extended": {
       "type": "boolean",
       "description": "Si se tomaron las metricas extendidas (RAVE_TRACE_EXTENDED). Los contadores por instruccion no dependen de esto."
+    },
+    "WAW_DIST": {
+      "type": "boolean"
+    },
+    "RAW_DIST": {
+      "type": "boolean"
+    },
+    "WAR_DIST": {
+      "type": "boolean"
     },
     "accumulate_regions": {
       "type": "boolean",
@@ -142,8 +154,6 @@
         "avg_occupancy",
         "vlen_bits",
         "avg_vlmax_elems",
-        "tu_effective",
-        "ta_effective",
         "unique_vector_registers"
       ],
       "additionalProperties": false,
@@ -216,7 +226,15 @@
             "total": { "type": "integer", "minimum": 0 },
             "raw": { "$ref": "#/$defs/depVector" },
             "waw": { "$ref": "#/$defs/depVector" },
-            "war": { "$ref": "#/$defs/depVector" }
+            "war": { "$ref": "#/$defs/depVector" },
+            "class_pairs": {
+              "$ref": "#/$defs/rawProducerConsumerMatrix",
+              "description": "Matriz bidimensional productor-consumidor para dependencias RAW vectoriales."
+            },
+            "parallelism_available": {
+                "$ref": "#/$defs/parallelismAvailable",
+                "description": "Media de instrucciones por tamaño de ventana que no tienen RAW entre sí."
+            }
           }
         }
       }
@@ -232,21 +250,166 @@
           "type": "number",
           "minimum": 0,
           "description": "Distancia media en instrucciones. Si count = 0 vale 0 (no es un error)."
+        },
+        "histogram": {
+          "$ref": "#/$defs/dependencyDistanceHistogram",
+          "description": "Histograma de distancias con bins 1, 2, 3, 4, 5-8, 9-16, 17-32, >32."
+        },
+        "cdf": {
+          "$ref": "#/$defs/dependencyCdf",
+          "description": "Distribución acumulada de las distancias."
+        },
+        "percentiles": {
+          "$ref": "#/$defs/dependencyPercentiles",
+          "description": "Mediana, P90 y P99 de la distancia."
         }
+      }
+    },
+
+    "dependencyDistanceHistogram": {
+      "type": "object",
+      "required": ["1", "2", "3", "4", "5-8", "9-16", "17-32", ">32"],
+      "additionalProperties": false,
+      "properties": {
+        "1": { "type": "integer", "minimum": 0 },
+        "2": { "type": "integer", "minimum": 0 },
+        "3": { "type": "integer", "minimum": 0 },
+        "4": { "type": "integer", "minimum": 0 },
+        "5-8": { "type": "integer", "minimum": 0 },
+        "9-16": { "type": "integer", "minimum": 0 },
+        "17-32": { "type": "integer", "minimum": 0 },
+        ">32": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "dependencyCdf": {
+      "type": "object",
+      "required": ["1", "2", "4", "8", "16", "32"],
+      "additionalProperties": false,
+      "properties": {
+        "1":  { "type": "number", "minimum": 0},
+        "2":  { "type": "number", "minimum": 0},
+        "4":  { "type": "number", "minimum": 0},
+        "8":  { "type": "number", "minimum": 0},
+        "16": { "type": "number", "minimum": 0},
+        "32": { "type": "number", "minimum": 0}
+      }
+    },
+
+    "dependencyPercentiles": {
+      "type": "object",
+      "required": ["median", "p90", "p99"],
+      "additionalProperties": false,
+      "properties": {
+        "median": { "type": "number", "minimum": 0 },
+        "p90": { "type": "number", "minimum": 0 },
+        "p99": { "type": "number", "minimum": 0 }
+      }
+    },
+
+    "rawProducerConsumerMatrix": {
+      "type": "object",
+      "description": "Distribución bidimensional de dependencias RAW según familia productora y consumidora.",
+      "required": ["raw_counts"],
+      "additionalProperties": false,
+      "properties": {
+        "raw_counts": {
+          "$ref": "#/$defs/rawMatrixCounts",
+          "description": "Matriz de ocurrencias absolutas de cada par productor-consumidor."
+        }
+      }
+    },
+
+    "rawMatrixCounts": {
+      "type": "object",
+      "description": "Filas: familias productoras de datos vectoriales.",
+      "required": [
+        "load",
+        "int_arith",
+        "fp_arith",
+        "fused",
+        "permutation",
+        "reduction",
+        "mask",
+        "scalar_to_vector"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "load": { "$ref": "#/$defs/consumerRowCounts" },
+        "int_arith": { "$ref": "#/$defs/consumerRowCounts" },
+        "fp_arith": { "$ref": "#/$defs/consumerRowCounts" },
+        "fused": { "$ref": "#/$defs/consumerRowCounts" },
+        "permutation": { "$ref": "#/$defs/consumerRowCounts" },
+        "reduction": { "$ref": "#/$defs/consumerRowCounts" },
+        "mask": { "$ref": "#/$defs/consumerRowCounts" },
+        "scalar_to_vector": { "$ref": "#/$defs/consumerRowCounts" }
+      }
+    },
+
+    "consumerRowCounts": {
+      "type": "object",
+      "description": "Columnas: familias consumidoras de datos vectoriales (conteo absoluto).",
+      "required": [
+        "store",
+        "int_arith",
+        "fp_arith",
+        "fused",
+        "permutation",
+        "reduction",
+        "mask",
+        "vector_to_scalar"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "store": { "type": "integer", "minimum": 0 },
+        "int_arith": { "type": "integer", "minimum": 0 },
+        "fp_arith": { "type": "integer", "minimum": 0 },
+        "fused": { "type": "integer", "minimum": 0 },
+        "permutation": { "type": "integer", "minimum": 0 },
+        "reduction": { "type": "integer", "minimum": 0 },
+        "mask": { "type": "integer", "minimum": 0 },
+        "vector_to_scalar": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "parallelismAvailable": {
+      "type": "object",
+      "description": "Media de instrucciones por tamaño de ventana que no tienen RAW entre sí.",
+      "required": ["2", "4", "8", "16"],
+      "additionalProperties": false,
+      "properties": {
+        "2":  { "type": "number", "minimum": 0.0, "maximum": 2.0 },
+        "4":  { "type": "number", "minimum": 0.0, "maximum": 4.0 },
+        "8":  { "type": "number", "minimum": 0.0, "maximum": 8.0 },
+        "16": { "type": "number", "minimum": 0.0, "maximum": 16.0 }
       }
     },
 
     "masked": {
       "type": "object",
       "description": "Instrucciones enmascaradas (vm=0) por categoria: `arith` y `memory`. `instr` es el total y `avg_density` la fraccion media de lanes activos de la mascara (0..1) con su desviacion tipica. Solo se rellena con trace_extended. Opcional: los JSON anteriores al 2026-10-18 no lo traen; si no hubo enmascaradas queda vacio.",
+      "required": ["masked_active_elements","avg_density"],
       "additionalProperties": false,
       "properties": {
+        "masked_active_elements": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Tamano del punto: suma de todos los elementos activos ejecutados bajo mascara."
+        },
+        "avg_density": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Eje Y: fraccion media global de lanes activos de la mascara (0..1)."
+        },
         "arith": { "$ref": "#/$defs/maskDensity" },
         "memory": { "$ref": "#/$defs/maskDensity" }
       }
     },
+
     "maskDensity": {
       "type": "object",
+      "description": "Desglose de la densidad de mascara por tipo de operacion.",
       "required": ["instr", "avg_density", "stddev_density"],
       "additionalProperties": false,
       "properties": {
@@ -301,7 +464,8 @@
       "type": "object",
       "description": "Estadisticas de las instrucciones vectoriales ejecutadas con ese SEW. El detalle de QUE instrucciones se han ejecutado no se repite aqui: esta en las categorias de la region.",
       "required": ["sew", "instr", "elems", "avg_vl", "elems_by_kind",
-                   "avg_stride_b", "stddev_stride_b"],
+                   "avg_stride_b", "stddev_stride_b", "scalar_vector_interface", "movement_profile",
+                   "policies"],
       "additionalProperties": false,
       "properties": {
         "sew": {
@@ -318,7 +482,21 @@
           "additionalProperties": false,
           "properties": {
             "arith": { "type": "integer", "minimum": 0 },
-            "memory": { "type": "integer", "minimum": 0 },
+            "memory": {
+              "type": "object",
+              "description": "Elementos de memoria desglosados por patron",
+              "required": [
+                "unit_stride",
+                "strided",
+                "indexed"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "unit_stride": { "type": "integer", "minimum": 0 },
+                "strided": { "type": "integer", "minimum": 0 },
+                "indexed": { "type": "integer", "minimum": 0 }
+            }
+            },
             "reduction": { "type": "integer", "minimum": 0 },
             "mask": { "type": "integer", "minimum": 0 }
           }
@@ -332,6 +510,200 @@
           "type": "number",
           "minimum": 0,
           "description": "Desviacion tipica del stride en BYTES; 0 si no hubo accesos strided."
+        },
+        "scalar_vector_interface": {
+          "$ref": "#/$defs/scalarVectorInterface",
+          "description": "Presion sobre interfaz escalar-vectorial."
+        },
+        "movement_profile": {
+          "$ref": "#/$defs/movementProfile",
+          "description": "Perfil de movimiento de los elementos."
+        },
+        "policies": {
+          "$ref": "#/$defs/policiesProfile",
+          "description": "Seleccion de politicas y preservacion efectiva."
+        }
+      }
+    },
+
+    "scalarVectorInterface": {
+      "type": "object",
+      "description": "Eventos y elementos que cruzan la interfaz escalar-vectorial.",
+      "required": [
+        "events_count",
+        "elements_affected"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "events_count": {
+          "type": "object",
+          "required": [
+            "broadcast_vx",
+            "broadcast_vf",
+            "scalar_to_vector",
+            "vector_to_scalar",
+            "scalar_result",
+            "vsetvl_config"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "broadcast_vx": { "type": "integer", "minimum": 0 },
+            "broadcast_vf": { "type": "integer", "minimum": 0 },
+            "scalar_to_vector": { "type": "integer", "minimum": 0 },
+            "vector_to_scalar": { "type": "integer", "minimum": 0, "description": "Transferencia directa entre un dato guardado en el VRF hacia PRF, e.g. vmv.x.s"},
+            "scalar_result": { "type": "integer", "minimum": 0, "description": "Instrucciones vectoriale cuya solución genera un valor escalar(e.g. vcpop.m)." },
+            "vsetvl_config": { "type": "integer", "minimum": 0, "description": "Instrucciones de la familia vset*." }
+          }
+        },
+        "elements_affected": {
+          "type": "object",
+          "required": [
+            "broadcast_vx_consumed_elements",
+            "broadcast_vf_consumed_elements",
+            "total_active_elements_processed"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "broadcast_vx_consumed_elements": { "type": "integer", "minimum": 0 },
+            "broadcast_vf_consumed_elements": { "type": "integer", "minimum": 0 },
+            "total_active_elements_processed": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+
+    "movementProfile": {
+      "type": "object",
+      "description": "Perfil de movimiento y comunicacion interna.",
+      "required": [
+        "arithmetic_useful_ops",
+        "categories"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "arithmetic_useful_ops": {
+          "type": "object",
+          "required": ["int_ops", "fp_ops"],
+          "additionalProperties": false,
+          "properties": {
+            "int_ops": { "type": "integer", "minimum": 0 },
+            "fp_ops": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "categories": {
+          "type": "object",
+          "required": [
+            "slides",
+            "gathers",
+            "compress",
+            "reductions",
+            "whole_register",
+            "mask_ops_scans",
+            "layout_conversions"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "slides": { "$ref": "#/$defs/movementMetric" },
+            "gathers": { "$ref": "#/$defs/movementMetric" },
+            "compress": { "$ref": "#/$defs/movementMetric" },
+            "reductions": { "$ref": "#/$defs/movementMetric" },
+            "whole_register": { "$ref": "#/$defs/movementMetric" },
+            "mask_ops_scans": { "$ref": "#/$defs/movementMetric" },
+            "layout_conversions": { "$ref": "#/$defs/movementMetric" }
+          }
+        }
+      }
+    },
+
+    "movementMetric": {
+      "type": "object",
+      "required": [
+        "instr",
+        "vrf_bytes_read",
+        "vrf_bytes_written"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "instr": { "type": "integer", "minimum": 0 },
+        "vrf_bytes_read": { "type": "number", "minimum": 0 },
+        "vrf_bytes_written": { "type": "number", "minimum": 0 }
+      }
+    },
+
+    "policiesProfile": {
+      "type": "object",
+      "description": "Metricas para Figura 4.4 por SEW.",
+      "required": [
+        "policy_selection",
+        "preservation_pressure"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "policy_selection": {
+          "type": "object",
+          "description": "Frecuencia de politicas de tail y mask.",
+          "required": [
+            "tu_instructions",
+            "ta_instructions",
+            "mu_masked_instructions",
+            "ma_masked_instructions"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "tu_instructions": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Instrucciones con tail-undisturbed."
+            },
+            "ta_instructions": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Instrucciones con tail-agnostic."
+            },
+            "mu_masked_instructions": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Instrucciones enmascaradas con mask-undisturbed."
+            },
+            "ma_masked_instructions": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Instrucciones enmascaradas con mask-agnostic."
+            }
+          }
+        },
+        "preservation_pressure": {
+          "type": "object",
+          "description": "Elementos destino afectados por estas politicas.",
+          "required": [
+            "tail_preserved_elements",
+            "mask_preserved_elements",
+            "active_written_elements",
+            "total_destination_elements"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "tail_preserved_elements": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Elementos tail que deben preservarse (TU activo y VL < VLMAX)."
+            },
+            "mask_preserved_elements": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Elementos inactivos por mascara que deben preservarse (MU activo y mask[i]==0)."
+            },
+            "active_written_elements": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Elementos activos computados y escritos normalmente."
+            },
+            "total_destination_elements": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Suma de tail + mask + activos destino."
+            }
+          }
         }
       }
     },
