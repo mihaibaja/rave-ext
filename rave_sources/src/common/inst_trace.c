@@ -200,10 +200,10 @@ void inst_trace_init(void) {
 
     write_json_escaped_string(FD_INST_TRACE, BINARY_NAME ? BINARY_NAME : "unknown");
 
-    fprintf(FD_INST_TRACE, ",\"config\":{\"raw_dist\":%d,\"war_dist\":%d,\"waw_dist\":%d,\"trace_scalar\":%d},"
+    fprintf(FD_INST_TRACE, ",\"config\":{\"trace_scalar\":%d},"
                            "\"num_harts\":%d,"
                            "\"addr_normalization\":\"base_relative\"}\n",
-            RAW_DIST, WAR_DIST, WAW_DIST, TRACE_SCALAR,
+            TRACE_SCALAR,
             expected_threads > 0 ? expected_threads : 1);
     fflush(FD_INST_TRACE);
     release_lock(write_lock);

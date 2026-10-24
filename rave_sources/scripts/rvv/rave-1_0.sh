@@ -21,6 +21,7 @@ echo "
  - **RAVE_INST_TRACE_NAME**: Sets the filename for the instruction trace (default: rave_inst_trace.jsonl).
  - **RAVE_DEBUG_INFO**: If set to \"1\", enables debug information. (default: 0)
  - **RAVE_RAW_DIST**: Sets the RAW dependency distance threshold.
+ - **RAVE_RAW_DIST_CHAINING**: Sets the RAW vector chaining distance threshold.
  - **RAVE_WAR_DIST**: Sets the WAR dependency distance threshold.
  - **RAVE_WAW_DIST**: Sets the WAW dependency distance threshold.
 
@@ -120,6 +121,9 @@ if [ "$RAVE_DEBUG_INFO" == "1" ]; then
 fi
 if [ "$RAVE_RAW_DIST" != "" ]; then
 	args=$args",RAW_DIST=$RAVE_RAW_DIST"
+fi
+if [ "$RAVE_RAW_DIST_CHAINING" != "" ]; then
+	args=$args",RAW_DIST_CHAINING=$RAVE_RAW_DIST_CHAINING"
 fi
 if [ "$RAVE_WAR_DIST" != "" ]; then
 	args=$args",WAR_DIST=$RAVE_WAR_DIST"

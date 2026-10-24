@@ -395,6 +395,10 @@ void rave_init(int argc, char **argv){
 				int event = atoi(&argv[i][j+1]);
 				REGION_EVENT = event>0 ? event : REGION_EVENT;
 			}
+			else if (contains_string(argv[i], "RAW_DIST_CHAINING")){
+				size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;
+				RAW_DIST_CHAINING = atoi(&argv[i][j+1]);
+			}
 			else if (contains_string(argv[i], "RAW_DIST")){
 				size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;
 				RAW_DIST = atoi(&argv[i][j+1]);

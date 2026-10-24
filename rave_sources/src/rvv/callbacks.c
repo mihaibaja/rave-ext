@@ -22,6 +22,107 @@ static void record_vector_register(double * usage, short reg){
 	}
 }
 
+static inline uint16_t get_distance_bin(long dist) {
+    if (dist <= 1) return 0;
+    if (dist == 2) return 1;
+    if (dist == 3) return 2;
+    if (dist == 4) return 3;
+    if (dist <= 8) return 4;
+    if (dist <= 16) return 5;
+    if (dist <= 32) return 6;
+    if (dist <= 64) return 7;
+    return 8;
+}
+
+#define INVALID_RAW_IDX 15
+/**
+ * 0: Load
+ * 1: Integer arithmetic
+ * 2: Floating-point arithmetic
+ * 3: Fused operations
+ * 4: Permutations
+ * 5: Reductions
+ * 6: Mask operations
+ * 7: Scalar to Vector
+ */
+static inline uint16_t get_prod_idx(uint16_t type) {
+    // 0. Load
+    if (is_type_ext(type, MASK_EXT_BASE, TYPE_EXT_LOAD)) return 0;
+
+    // 7. Scalar to Vector (la instrucción lee un escalar y produce/escribe en vector)
+    if (is_type_ext(type, MASK_EXT_OPERAND, TYPE_EXT_READ_SCALAR) 
+        && is_type_ext(type, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_MOVE)) return 7;
+
+    // Si es instrucción aritmética
+    if (is_type_ext(type, MASK_EXT_BASE, TYPE_EXT_ARITH)) {
+        uint16_t op = type & MASK_EXT_SUBSUBTYPE;
+
+        // 4. Permutaciones (move, slide, compress, gather)
+        if (op == TYPE_EXT_ARITH_MOVE   || op == TYPE_EXT_ARITH_SLIDE ||
+            op == TYPE_EXT_ARITH_COMPRESS || op == TYPE_EXT_ARITH_GATHER) return 4;
+        // 5. Reducciones
+        if (op == TYPE_EXT_ARITH_REDUCTION) return 5;
+        // 6. Operaciones de Máscara
+        if (op == TYPE_EXT_ARITH_MASK) return 6;
+        // 3. Fused (FMA / widening fused, etc.)
+        if (op == TYPE_EXT_ARITH_COMP_FUSED) return 3;
+
+        // 1 y 2. Aritmética estándar
+        if (op == TYPE_EXT_ARITH_COMPUTATION) {
+            if (is_type_ext(type, TYPE_EXT_FP, TYPE_EXT_FP)) return 2; // fp arith
+            return 1; // int arith
+        }
+    }
+
+    return INVALID_RAW_IDX;
+}
+/**
+ * 0: Store
+ * 1: Integer arithmetic
+ * 2: Floating-point arithmetic
+ * 3: Fused operations
+ * 4: Permutations
+ * 5: Reductions
+ * 6: Mask operations
+ * 7: Vector to scalar
+ */
+static inline uint16_t get_cons_idx(uint16_t type) {
+    // 0. Store
+    if (is_type_ext(type, MASK_EXT_BASE, TYPE_EXT_STORE)) return 0;
+
+    // 7. Vector to Scalar (la instrucción vectorial extrae a escalar)
+    if (is_type_ext(type, MASK_EXT_OPERAND, TYPE_EXT_WRITE_SCALAR)
+        && is_type_ext(type, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_MOVE)) return 7;
+
+    // Si es instrucción aritmética consumidora
+    if (is_type_ext(type, MASK_EXT_BASE, TYPE_EXT_ARITH)) {
+        uint16_t op = type & MASK_EXT_SUBSUBTYPE;
+
+        // 4. Permutaciones
+        if (op == TYPE_EXT_ARITH_MOVE   || op == TYPE_EXT_ARITH_SLIDE ||
+            op == TYPE_EXT_ARITH_COMPRESS || op == TYPE_EXT_ARITH_GATHER) return 4;
+
+        // 5. Reducciones
+        if (op == TYPE_EXT_ARITH_REDUCTION) return 5;
+
+        // 6. Operaciones de Máscara
+        if (op == TYPE_EXT_ARITH_MASK) return 6;
+
+        // 3. Fused
+        if (op == TYPE_EXT_ARITH_COMP_FUSED) return 3;
+
+        // 1 y 2. Aritmética estándar
+        if (op == TYPE_EXT_ARITH_COMPUTATION) {
+            if (is_type_ext(type, TYPE_EXT_FP, TYPE_EXT_FP)) return 2; // fp arith
+            return 1; // int arith
+        }
+    }
+
+    return INVALID_RAW_IDX;
+}
+
+
+
 inline uint64_t synch_threads(thread_state_t * state){
 	int cpu_index = state->cpu_index;
 	if (cpu_index >= N_THREADS){ //Wait for the thread to be properly initialized
@@ -106,16 +207,18 @@ void scalar_block_exec(thread_state_t * state, scalar_block_data_t * data){
             for(int i=0; i<n_instr; ++i){
                 // -ADDED
                 inst_compressed_t instr_c;
-                instr_c.asm_string = data->strings[i];
-                uint64_t pos_aux = 0;
-                for(int j=0; j<SEWS; ++j){
-                    pos_aux+=state->accum_counters.vector_instr[j];
-                }
-                instr_c.pos = state->accum_counters.scalar_instr+state->accum_counters.vsetvl_instr+pos_aux+1;
-                instr_c.type = 0x0000; //Scalar instruction
 
-				if(valid_reg_id(data->dst_d[i])) state->write_reg_deps[data->dst_d[i]] = instr_c;
-				if(valid_reg_id(data->src1_d[i])) state->read_reg_deps[data->src1_d[i]] = instr_c;
+                instr_c.pos = 0;
+                instr_c.g_pos = ++state->accum_counters.g_pos;
+                instr_c.type = 0x0000; //Scalar instruction
+                
+                int dst  = data->dst_d  ? data->dst_d[i]  : -1;
+                int src1 = data->src1_d ? data->src1_d[i] : -1;
+                int src2 = data->src2_d ? data->src2_d[i] : -1;
+
+                if (valid_reg_id(dst))  state->write_reg_deps[dst]  = instr_c;
+                if (valid_reg_id(src1)) state->read_reg_deps[src1] = instr_c;
+                if (valid_reg_id(src2)) state->read_reg_deps[src2] = instr_c;
 
                 // -ENDADDED
             }
@@ -297,77 +400,97 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 	int64_t * indexes_64 = NULL;
 
     // To keep track of dependencies
-    if(TRACE_EXTENDED){
+    if(TRACE_EXTENDED && !is_type(instr->type, T_VSETVL)){
         inst_compressed_t instr_c;
-        instr_c.asm_string = instr->asm_string;
-        uint64_t pos_aux = 0;
-        for(int j=0; j<SEWS; ++j){
-            pos_aux+=state->accum_counters.vector_instr[j];
-        }
-        instr_c.pos = state->accum_counters.scalar_instr+state->accum_counters.vsetvl_instr+pos_aux+1;
-        instr_c.type = instr->type;
-        if(valid_reg_id(instr->dst_d)){
-            if(state->write_reg_deps[instr->dst_d].pos != 0
-                && (instr_c.pos-state->write_reg_deps[instr->dst_d].pos <= WAW_DIST)) {
-                    if (instr->dst_d >= RAVE_INI_REG_V) { // If the destination register is a vector register, count it as a VWAW dependency
-                        state->accum_counters.VWAW_deps++;
-                        state->accum_counters.avg_VWAW_deps += instr_c.pos-state->write_reg_deps[instr->dst_d].pos;
-                    } else {                              // Otherwise, count it as a WAW dependency(dependencie with scalar instructions)
+        instr_c.pos   = ++state->accum_counters.v_pos;
+        instr_c.g_pos = ++state->accum_counters.g_pos;
+        instr_c.type = instr->type_ext;
+        if (valid_reg_id(instr->dst_d)) {
+            // CASO A: Destino Vectorial (Vector -> Vector)
+            if (instr->dst_d >= RAVE_INI_REG_V) {
+                // VWAW
+                if (state->write_reg_deps[instr->dst_d].pos != 0) {
+                    long dist_waw = instr_c.pos - state->write_reg_deps[instr->dst_d].pos;
+                    state->accum_counters.VWAW_deps[get_distance_bin(dist_waw)]++;
+                    state->accum_counters.total_VWAW_deps++;
+                    state->accum_counters.avg_VWAW_deps += dist_waw;
+
+                    if (DEBUG_INFO) {
+                        fprintf(stdout, "VWAW dependency on vreg %d: pos %li, prev write at pos %li\n", 
+                            instr->dst_d, instr_c.pos, state->write_reg_deps[instr->dst_d].pos);
+                    }
+                }
+                // VWAR
+                if (state->read_reg_deps[instr->dst_d].pos != 0) {
+                    long dist_war = instr_c.pos - state->read_reg_deps[instr->dst_d].pos;
+                    state->accum_counters.VWAR_deps[get_distance_bin(dist_war)]++;
+                    state->accum_counters.total_VWAR_deps++;
+                    state->accum_counters.avg_VWAR_deps += dist_war;
+
+                    if (DEBUG_INFO) {
+                        fprintf(stdout, "VWAR dependency on vreg %d: pos %li, prev read at pos %li\n", 
+                            instr->dst_d, instr_c.pos, state->read_reg_deps[instr->dst_d].pos);
+                    }
+                }
+            } 
+            // CASO B: Destino Escalar (Vector escribe en registro escalar x1..x31)
+            else if (instr->dst_d > 0) {
+                // WAW Escalar: Escalar previo escribió en dst_d y ahora el vector lo sobrescribe
+                if (state->write_reg_deps[instr->dst_d].g_pos != 0) {
+                    long dist_waw_s = instr_c.g_pos - state->write_reg_deps[instr->dst_d].g_pos;
+                    if (dist_waw_s <= WAW_DIST) {
                         state->accum_counters.WAW_deps++;
                     }
-                    if(DEBUG_INFO) fprintf(stdout, "WAW dependency detected on register %d: write at pos %li, instruction: %s, previous write at pos %li, previous instruction: %s\n", 
-                        instr->dst_d, instr_c.pos, instr->asm_string, 
-                        state->write_reg_deps[instr->dst_d].pos, state->write_reg_deps[instr->dst_d].asm_string);            
-            }
-            if(state->write_reg_deps[instr->dst_d].pos != 0
-                && (instr_c.pos-state->read_reg_deps[instr->dst_d].pos <= WAR_DIST)) {
-                    if (instr->dst_d >= RAVE_INI_REG_V) {
-                        state->accum_counters.VWAR_deps++;
-                        state->accum_counters.avg_VWAR_deps += instr_c.pos-state->read_reg_deps[instr->dst_d].pos;
-                    } else {
+                    if (DEBUG_INFO) {
+                        fprintf(stdout, "Scalar WAW on xreg %d: g_pos %li, prev write at g_pos %li (dist %li)\n",
+                            instr->dst_d, instr_c.g_pos, state->write_reg_deps[instr->dst_d].g_pos, dist_waw_s);
+                    }
+                }
+
+                // WAR Escalar: Escalar previo leyó dst_d y ahora el vector lo sobrescribe
+                if (state->read_reg_deps[instr->dst_d].g_pos != 0) {
+                    long dist_war_s = instr_c.g_pos - state->read_reg_deps[instr->dst_d].g_pos;
+                    if (dist_war_s <= WAR_DIST) {
                         state->accum_counters.WAR_deps++;
                     }
-                    if(DEBUG_INFO) fprintf(stdout, "WAR dependency detected on register %d: write at pos %li, instruction: %s, previous read at pos %li, previous instruction: %s\n", 
-                        instr->dst_d, instr_c.pos, instr->asm_string, 
-                        state->read_reg_deps[instr->dst_d].pos, state->read_reg_deps[instr->dst_d].asm_string);
+                    if (DEBUG_INFO) {
+                        fprintf(stdout, "Scalar WAR on xreg %d: g_pos %li, prev read at g_pos %li (dist %li)\n",
+                            instr->dst_d, instr_c.g_pos, state->read_reg_deps[instr->dst_d].g_pos, dist_war_s);
+                    }
+                }
             }
         }
-        if(valid_reg_id(instr->src1_d) && (instr->src1_d > 0 && state->write_reg_deps[instr->src1_d].pos != 0)
-            && (instr_c.pos-state->write_reg_deps[instr->src1_d].pos <= RAW_DIST)) {
-                if (instr->src1_d >= RAVE_INI_REG_V) {
-                    state->accum_counters.VRAW_deps++;
-                    state->accum_counters.avg_VRAW_deps += instr_c.pos-state->write_reg_deps[instr->src1_d].pos;
-                } else {
-                    state->accum_counters.RAW_deps++;
-                }
-                if(DEBUG_INFO) fprintf(stdout, "RAW dependency detected on register %d: read at pos %li, instruction: %s, previous write at pos %li, previous instruction: %s\n", 
-                    instr->src1_d, instr_c.pos, instr->asm_string, 
-                    state->write_reg_deps[instr->src1_d].pos, state->write_reg_deps[instr->src1_d].asm_string);
-        }
-        if(valid_reg_id(instr->src2_d) &&(instr->src2_d > 0 && state->write_reg_deps[instr->src2_d].pos != 0)
-            && (instr_c.pos-state->write_reg_deps[instr->src2_d].pos <= RAW_DIST)){
-                if (instr->src2_d >= RAVE_INI_REG_V) {
-                    state->accum_counters.VRAW_deps++;
-                    state->accum_counters.avg_VRAW_deps += instr_c.pos-state->write_reg_deps[instr->src2_d].pos;
-                } else {
-                    state->accum_counters.RAW_deps++;
-                }
-                if(DEBUG_INFO) fprintf(stdout, "RAW dependency detected on register %d: read at pos %li, instruction: %s, previous write at pos %li, previous instruction: %s\n", 
-                    instr->src2_d, instr_c.pos, instr->asm_string, 
-                    state->write_reg_deps[instr->src2_d].pos, state->write_reg_deps[instr->src2_d].asm_string);
-        }
-        if(valid_reg_id(instr->src3_d) &&(instr->src3_d > 0 && state->write_reg_deps[instr->src3_d].pos != 0)
-            && (instr_c.pos-state->write_reg_deps[instr->src3_d].pos <= RAW_DIST)){
-                if (instr->src3_d >= RAVE_INI_REG_V) {
-                    state->accum_counters.VRAW_deps++;
-                    state->accum_counters.avg_VRAW_deps += instr_c.pos-state->write_reg_deps[instr->src3_d].pos;
-                } else {
-                    state->accum_counters.RAW_deps++;
-                }
-                if(DEBUG_INFO) fprintf(stdout, "RAW dependency detected on register %d: read at pos %li, instruction: %s, previous write at pos %li, previous instruction: %s\n", 
-                    instr->src3_d, instr_c.pos, instr->asm_string, 
-                    state->write_reg_deps[instr->src3_d].pos, state->write_reg_deps[instr->src3_d].asm_string);
-        }
+        #define CHECK_V_TO_V_RAW(src_reg) \
+            if(valid_reg_id(src_reg)) { \
+                if (src_reg >= RAVE_INI_REG_V && state->write_reg_deps[src_reg].pos != 0 ) { \
+                    long dist_chaining = instr_c.pos-state->write_reg_deps[src_reg].pos; \
+                    state->accum_counters.VRAW_deps[get_distance_bin(dist_chaining)]++; \
+                    state->accum_counters.avg_VRAW_deps += dist_chaining;  \
+                    state->accum_counters.total_VRAW_deps++; \
+                    if (dist_chaining <= RAW_DIST_CHAINING) { \
+                        uint8_t prod = get_prod_idx(state->write_reg_deps[src_reg].type); \
+                        uint8_t cons = get_cons_idx(instr->type_ext);  \
+                        if (prod != INVALID_RAW_IDX && cons != INVALID_RAW_IDX) { \
+                            state->accum_counters.RAW_MATRIX_PC[prod][cons]++; \
+                        } \
+                    } \
+                    if(DEBUG_INFO) { \
+                        fprintf(stdout, "VRAW dependency detected on register %d: read at pos %li, instruction: %s, previous write at pos %li\n", \
+                            (src_reg), instr_c.pos, instr->asm_string, \
+                            state->write_reg_deps[src_reg].pos); \
+                    } \
+                } else if(src_reg > 0) {  \
+                    if(state->write_reg_deps[src_reg].g_pos != 0 && instr_c.g_pos - state->write_reg_deps[src_reg].g_pos <= RAW_DIST) {  \
+                        state->accum_counters.RAW_deps++; \
+                    } \
+                } \
+            }
+
+        CHECK_V_TO_V_RAW(instr->src1_d);
+        CHECK_V_TO_V_RAW(instr->src2_d);
+        CHECK_V_TO_V_RAW(instr->src3_d);
+        #undef CHECK_V_TO_V_RAW
+
         if(valid_reg_id(instr->dst_d)) state->write_reg_deps[instr->dst_d] = instr_c;
         if(valid_reg_id(instr->src1_d)) state->read_reg_deps[instr->src1_d] = instr_c;
         if(valid_reg_id(instr->src2_d)) state->read_reg_deps[instr->src2_d] = instr_c;

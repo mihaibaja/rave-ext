@@ -106,15 +106,25 @@ struct rave_counters{
                 double VLMAX_accumulated;
 
                 // To keep track of the number of dependencies(scalar and vector)
-                double VRAW_deps;
-                double VWAR_deps;
-                double VWAW_deps;
-                double RAW_deps;
-                double WAR_deps;
-                double WAW_deps;
+                double v_pos;
+                double g_pos;
+                double RAW_deps; 
+                double WAR_deps; 
+                double WAW_deps; 
                 double avg_VRAW_deps;
                 double avg_VWAR_deps;
                 double avg_VWAW_deps;
+                double total_VRAW_deps;
+                double total_VWAR_deps;
+                double total_VWAW_deps;
+                double VRAW_deps[9]; // 1, 2, 3, 4, 5-8, 9-16, 17-32, 33-64, >64
+                double VWAR_deps[9]; // 1, 2, 3, 4, 5-8, 9-16, 17-32, 33-64, >64
+                double VWAW_deps[9]; // 1, 2, 3, 4, 5-8, 9-16, 17-32, 33-64, >64
+                /**
+                 * Productores:  load,  int arith, fp arith, fused, perm, reduction, mask, scalar_to_vector
+                 * Consumidores: store, int arith, fp arith, fused, perm, reduction, mask, vector_to_scalar
+                 */
+                double RAW_MATRIX_PC[8][8]; 
 
                 // To track the number of (effective) times we've had ta vs tu
                 double ta_count;

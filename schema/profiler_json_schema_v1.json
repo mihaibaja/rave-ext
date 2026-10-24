@@ -10,9 +10,6 @@
     "vlen_bits",
     "trace_extended",
     "accumulate_regions",
-    "RAW_DIST",
-    "WAW_DIST",
-    "WAR_DIST",
     "region_count",
     "regions"
   ],
@@ -35,15 +32,6 @@
     "trace_extended": {
       "type": "boolean",
       "description": "Si se tomaron las metricas extendidas (RAVE_TRACE_EXTENDED). Los contadores por instruccion no dependen de esto."
-    },
-    "WAW_DIST": {
-      "type": "boolean"
-    },
-    "RAW_DIST": {
-      "type": "boolean"
-    },
-    "WAR_DIST": {
-      "type": "boolean"
     },
     "accumulate_regions": {
       "type": "boolean",
@@ -271,20 +259,20 @@
       "required": ["1", "2", "3", "4", "5-8", "9-16", "17-32", ">32"],
       "additionalProperties": false,
       "properties": {
-        "1": { "type": "integer", "minimum": 0 },
-        "2": { "type": "integer", "minimum": 0 },
-        "3": { "type": "integer", "minimum": 0 },
-        "4": { "type": "integer", "minimum": 0 },
-        "5-8": { "type": "integer", "minimum": 0 },
-        "9-16": { "type": "integer", "minimum": 0 },
-        "17-32": { "type": "integer", "minimum": 0 },
-        ">32": { "type": "integer", "minimum": 0 }
+        "1": { "type": "number", "minimum": 0 },
+        "2": { "type": "number", "minimum": 0 },
+        "3": { "type": "number", "minimum": 0 },
+        "4": { "type": "number", "minimum": 0 },
+        "5-8": { "type": "number", "minimum": 0 },
+        "9-16": { "type": "number", "minimum": 0 },
+        "17-32": { "type": "number", "minimum": 0 },
+        ">32": { "type": "number", "minimum": 0 }
       }
     },
 
     "dependencyCdf": {
       "type": "object",
-      "required": ["1", "2", "4", "8", "16", "32"],
+      "required": ["1", "2", "4", "8", "16", "32", "64"],
       "additionalProperties": false,
       "properties": {
         "1":  { "type": "number", "minimum": 0},
@@ -292,7 +280,8 @@
         "4":  { "type": "number", "minimum": 0},
         "8":  { "type": "number", "minimum": 0},
         "16": { "type": "number", "minimum": 0},
-        "32": { "type": "number", "minimum": 0}
+        "32": { "type": "number", "minimum": 0},
+        "64": { "type": "number", "minimum": 0}
       }
     },
 
