@@ -335,6 +335,11 @@ static double safe_div(double num, double den){
 	return den > 0 ? num/den : 0.0;
 }
 
+static int is_indexed_category(short cat){
+	return cat == RAVE_VINSTR_CAT_INDEXED ||
+	       cat == RAVE_VINSTR_CAT_INDEXED_SEGMENT;
+}
+
 static void print_sew_json(FILE * fd, rave_counters * c, int s){
 	/* El detalle de QUE instrucciones se han ejecutado sale del arbol de
 	 * categorias (nivel de region). Aqui quedan las estadisticas, incluidas las
@@ -473,7 +478,7 @@ void print_counters_json(FILE * fd, rave_counters * c){
 			int h = 1;
 			for (int i = 0; i < RAVE_VINSTR_COUNT; ++i){
 				const char * mn;
-				if (rave_vinstr_category_of(i) != RAVE_VINSTR_CAT_INDEXED) continue;
+				if (!is_indexed_category(rave_vinstr_category_of(i))) continue;
 				if (c->addr_range_n[i] <= 0) continue;
 				mn = rave_vinstr_mnemonic(i);
 				if (mn == NULL) continue;
@@ -544,23 +549,6 @@ static void print_instr_category_json(FILE * fd, int * first, int cat,
 	for (int c = 0; c < RAVE_VINSTR_NCAT; ++c)
 		if (rave_vinstr_categories[c].parent == cat && cat_tot[c] > 0)
 			print_instr_category_json(fd, &inner, c, instr_tot, cat_tot);
-	/* Las indexadas no se emiten una a una: se suman por prefijo del
-	 * mnemonico en dos claves, `load` (vl*) y `store` (vs*). */
-	if (cat == RAVE_VINSTR_CAT_INDEXED){
-		double load = 0, store = 0;
-		for (int i = 0; i < RAVE_VINSTR_COUNT; ++i){
-			const char * mn;
-			if (rave_vinstr_category_of(i) != cat || instr_tot[i] <= 0) continue;
-			mn = rave_vinstr_mnemonic(i);
-			if (mn == NULL) continue;
-			if (mn[0] == 'v' && mn[1] == 'l') load += instr_tot[i];
-			else if (mn[0] == 'v' && mn[1] == 's') store += instr_tot[i];
-		}
-		if (load > 0) json_int(fd, &inner, "load", load);
-		if (store > 0) json_int(fd, &inner, "store", store);
-		json_obj_close(fd);
-		return;
-	}
 	for (int i = 0; i < RAVE_VINSTR_COUNT; ++i)
 		if (rave_vinstr_category_of(i) == cat && instr_tot[i] > 0)
 			json_int(fd, &inner, rave_vinstr_name(i), instr_tot[i]);

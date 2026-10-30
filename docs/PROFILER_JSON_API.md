@@ -207,11 +207,10 @@ instrucción, agrupados con los mismos niveles que el listado
   decenas de claves, no 630. Una clave ausente es `0`.
 * Cada instrucción cuelga de **una sola** rama: no hay categorías solapadas, así
   que se puede sumar cualquier nivel sin duplicar nada (§1.7).
-* **Indexadas colapsadas**: `vluxei*`/`vloxei*` se suman en `indexed.load` y
-  `vsuxei*`/`vsoxei*` en `indexed.store`; las segmentadas indexadas
-  (`vluxseg*`, `vsoxseg`…) van a las mismas dos sumas, así que la sección
-  `indexed_segment` ya no aparece. Las distancias de esas instrucciones se
-  agregan también por grupo en `memory_addresses` (§1.5).
+* **Indexadas por instrucción**: `vluxei*`/`vloxei*` y `vsuxei*`/`vsoxei*`
+  cuelgan de `indexed`, cada una con su contador `<mnemonico>_counter`; las
+  segmentadas indexadas (`vluxseg*`, `vsoxseg`…) cuelgan de `indexed_segment`.
+  Las distancias de todas ellas se siguen agrupando en `memory_addresses` (§1.5).
 * Los **`vset*`** (`vsetvli`, `vsetivli`, `vsetvl`) van en
   `configuration_setting` aunque no tengan SEW: por eso el árbol está a nivel de
   región y no dentro de cada `<bloque_sew>`. Si la región no ejecutó ninguna
@@ -228,10 +227,11 @@ instrucción, agrupados con los mismos niveles que el listado
 
 ### 1.5 `memory_addresses` — distancias de las indexadas
 
-Sólo se perfilan las instrucciones **indexadas**. Para cada ejecución se calculan
-sus direcciones efectivas (`base (rs1) + índice × EEW`) y se toma el rango
-`max − min`. Por instrucción se acumulan esos rangos; el JSON publica **una sola
-media por grupo** (cargas y almacenamientos):
+Sólo se perfilan las instrucciones **indexadas**, incluidas las segmentadas
+indexadas (`indexed_segment`). Para cada ejecución se calculan sus direcciones
+efectivas (`base (rs1) + índice × EEW`) y se toma el rango `max − min`. Por
+instrucción se acumulan esos rangos; el JSON publica **una sola media por
+grupo** (cargas y almacenamientos):
 
 ```json
 "memory_addresses": {
@@ -424,9 +424,10 @@ escritor JSON tiene que reflejarse aquí (y en `schema/profiler_json_schema_v1.j
 
 | Fecha | Cambio en RAVE | Efecto en el contrato |
 |---|---|---|
+| 2026-10-30 | `gen_instr_counters.py` + `counters.c`: se deshace el colapso de las indexadas | Las instrucciones indexadas vuelven a emitirse por separado en `indexed` e `indexed_segment`, cada una con su `<mnemonico>_counter`; `memory_addresses` incluye ambas ramas |
 | 2026-10-16 | `instr_counters.c` (nuevo) + `instr_data.c` + `callbacks.c`: contador propio por cada instrucción vectorial (630), con `_counter` en el nombre; `gen_instr_counters.py` los agrupa con los niveles de `docs/rvv instr.md` | **Rediseño del contrato (v2)**: los contadores por instrucción pasan a `region.instructions`, con las categorías del listado (§1.4.1), que forman una partición. El bloque de recuentos anterior se conserva en `counters.instructions_previous_version` (§1.1); desaparecen sus desgloses por SEW `arith`/`memory`/`reduction`/`mask`/`other` y los contadores agregados (`vunit_instr`, `vint_instr`…), que se recalculan sumando categorías (§1.7). El bloque SEW se queda con las estadísticas y con lo que **no** se deduce del árbol: `elems_by_kind` y `avg_stride_b`/`stddev_stride_b` (§1.4) |
 | 2026-10-18 | merge de `24c83b9` (mask metrics) | **`counters.masked`** (§1.6): instrucciones enmascaradas y densidad media de la máscara por categoría (arith / memory), sólo con `trace_extended`. La rama original sólo lo sacaba por el informe de texto |
-| 2026-10-18 | `gen_instr_counters.py` (sumas por prefijo) + `callbacks.c` (rango de direcciones) | **Indexadas colapsadas**: `indexed.load` / `indexed.store` suman todos los encodings (también las segmentadas indexadas, que pierden su nodo). Nuevo bloque opcional `counters.memory_addresses` (§1.5): media del rango `max−min` por instrucción indexada, con el mismo peso para todas al agregar |
+| 2026-10-18 | `gen_instr_counters.py` (sumas por prefijo) + `callbacks.c` (rango de direcciones) | **Indexadas colapsadas**: `indexed.load` / `indexed.store` suman todos los encodings (también las segmentadas indexadas, que pierden su nodo). Nuevo bloque opcional `counters.memory_addresses` (§1.5): media del rango `max−min` por instrucción indexada, con el mismo peso para todas al agregar. Revertido el 2026-10-30 |
 | 2026-10-12 | `inst_trace.c`: nueva traza dinámica por instrucción (JSONL, otro fichero) | Ninguno: este contrato son los contadores agregados por región |
 | 2026-10-12 | `instr_data.c`: las reducciones se marcan con su bit FP/INT | `reduction.int` deja de ser siempre `0`; las reducciones salen de `computation` (§1.4) |
 | 2026-10-12 | `callbacks.c`: los riesgos se separan por registro escalar/vectorial | `dependencies.scalar.*` deja de ser siempre `0` (§1.3) |

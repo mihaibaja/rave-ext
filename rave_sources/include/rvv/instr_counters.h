@@ -656,9 +656,10 @@ enum rave_vinstr_id {
 typedef struct { const char *name; short parent; } rave_vinstr_category;
 extern const rave_vinstr_category rave_vinstr_categories[RAVE_VINSTR_NCAT];
 
-/* Indice de la categoria `indexed`: sus contadores se suman en el
- * JSON en dos claves, load (mnemonicos vl*) y store (vs*). */
+/* Indices de las categorias indexadas: agrupan sus distancias de
+ * direcciones en memory_addresses. */
 #define RAVE_VINSTR_CAT_INDEXED 4
+#define RAVE_VINSTR_CAT_INDEXED_SEGMENT 9
 
 /* Indice de la instruccion a partir de su mnemonico ("vadd.vv"),
  * o -1 si no es una instruccion vectorial conocida. */
