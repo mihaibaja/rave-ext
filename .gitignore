@@ -18,6 +18,19 @@ downloads/
 *~
 compile_commands.json
 .cache/
+CMakeCache.txt
+CMakeFiles/
+cmake-build-*/
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+*.dSYM/
+*.mod
+*.smod
+
+# Excepcion: libomp precompilada que necesita RAVE_PARALLEL.
+!rave_sources/parallel/lib/libomp.so
 
 # --- Python ----------------------------------------------------------------
 __pycache__/
