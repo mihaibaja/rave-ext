@@ -20,6 +20,19 @@
 	fprintf(fd,"%c",fin);
 
 #define SEWS 4
+
+/* Categorias de movement_profile, en el orden en que salen en el JSON. */
+enum rave_movement_category {
+    RAVE_MOVEMENT_SLIDES = 0,
+    RAVE_MOVEMENT_GATHERS,
+    RAVE_MOVEMENT_COMPRESS,
+    RAVE_MOVEMENT_REDUCTIONS,
+    RAVE_MOVEMENT_WHOLE_REGISTER,
+    RAVE_MOVEMENT_MASK_OPS_SCANS,
+    RAVE_MOVEMENT_LAYOUT_CONVERSIONS,
+    RAVE_MOVEMENT_CATEGORIES
+};
+
 struct rave_counters{
 				double scalar_instr;
 				double vsetvl_instr;
@@ -119,6 +132,41 @@ struct rave_counters{
                 // To track the number of (effective) times we've had ta vs tu
                 double ta_count;
                 double tu_count;
+
+                /* --- Metricas del contrato JSON extendido ------------------ */
+                /* Elementos de memoria por patron. */
+                double velem_mem_unit[SEWS];
+                double velem_mem_stride[SEWS];
+                double velem_mem_indexed[SEWS];
+
+                /* Interfaz escalar-vector. */
+                double sv_broadcast_vx_instr[SEWS];
+                double sv_broadcast_vf_instr[SEWS];
+                double sv_scalar_to_vector_instr[SEWS];
+                double sv_vector_to_scalar_instr[SEWS];
+                double sv_scalar_result_instr[SEWS];
+                double sv_vsetvl_instr[SEWS];
+                double sv_broadcast_vx_elems[SEWS];
+                double sv_broadcast_vf_elems[SEWS];
+
+                /* Perfil de movimiento: instrucciones y bytes de VRF. */
+                double movement_instr[RAVE_MOVEMENT_CATEGORIES][SEWS];
+                double movement_vrf_read[RAVE_MOVEMENT_CATEGORIES][SEWS];
+                double movement_vrf_write[RAVE_MOVEMENT_CATEGORIES][SEWS];
+
+                /* Politicas tail/mask y presion de preservacion. */
+                double policy_tu_instr[SEWS];
+                double policy_ta_instr[SEWS];
+                double policy_mu_instr[SEWS];
+                double policy_ma_instr[SEWS];
+                double policy_tail_preserved_elems[SEWS];
+                double policy_mask_preserved_elems[SEWS];
+                double policy_active_written_elems[SEWS];
+                double policy_total_dest_elems[SEWS];
+
+                /* Mascaras: elementos activos y lanes para la densidad global. */
+                double vmasked_active_elems[2][SEWS];
+                double vmasked_lanes[2][SEWS];
 };
 typedef struct rave_counters rave_counters;
 

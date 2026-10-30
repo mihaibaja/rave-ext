@@ -340,6 +340,16 @@ static int is_indexed_category(short cat){
 	       cat == RAVE_VINSTR_CAT_INDEXED_SEGMENT;
 }
 
+static void print_movement_metric(FILE * fd, int * first, const char * name,
+                                  const rave_counters * c, int cat, int s){
+	int h = 1;
+	json_obj_open(fd, first, name);
+	json_int(fd, &h, "instr", c->movement_instr[cat][s]);
+	json_num(fd, &h, "vrf_bytes_read", c->movement_vrf_read[cat][s]);
+	json_num(fd, &h, "vrf_bytes_written", c->movement_vrf_write[cat][s]);
+	json_obj_close(fd);
+}
+
 static void print_sew_json(FILE * fd, rave_counters * c, int s){
 	/* El detalle de QUE instrucciones se han ejecutado sale del arbol de
 	 * categorias (nivel de region). Aqui quedan las estadisticas, incluidas las
@@ -367,12 +377,73 @@ static void print_sew_json(FILE * fd, rave_counters * c, int s){
 	json_obj_open(fd, &f, "elems_by_kind");
 		{ int h = 1;
 		  json_int(fd, &h, "arith", c->velem_arith[s]);
-		  json_int(fd, &h, "memory", c->velem_mem[s]);
+		  json_obj_open(fd, &h, "memory");
+			{ int m = 1;
+			  json_int(fd, &m, "unit_stride", c->velem_mem_unit[s]);
+			  json_int(fd, &m, "strided", c->velem_mem_stride[s]);
+			  json_int(fd, &m, "indexed", c->velem_mem_indexed[s]); }
+		  json_obj_close(fd);
 		  json_int(fd, &h, "reduction", c->velem_reductions[s]);
 		  json_int(fd, &h, "mask", c->velem_mask[s]); }
 	json_obj_close(fd);
 	json_num(fd, &f, "avg_stride_b", avg_stride);
 	json_num(fd, &f, "stddev_stride_b", sqrt(stride_var));
+
+	json_obj_open(fd, &f, "scalar_vector_interface");
+		{ int h = 1;
+		  json_obj_open(fd, &h, "events_count");
+			{ int k = 1;
+			  json_int(fd, &k, "broadcast_vx", c->sv_broadcast_vx_instr[s]);
+			  json_int(fd, &k, "broadcast_vf", c->sv_broadcast_vf_instr[s]);
+			  json_int(fd, &k, "scalar_to_vector", c->sv_scalar_to_vector_instr[s]);
+			  json_int(fd, &k, "vector_to_scalar", c->sv_vector_to_scalar_instr[s]);
+			  json_int(fd, &k, "scalar_result", c->sv_scalar_result_instr[s]);
+			  json_int(fd, &k, "vsetvl_config", c->sv_vsetvl_instr[s]); }
+		  json_obj_close(fd);
+		  json_obj_open(fd, &h, "elements_affected");
+			{ int k = 1;
+			  json_int(fd, &k, "broadcast_vx_consumed_elements", c->sv_broadcast_vx_elems[s]);
+			  json_int(fd, &k, "broadcast_vf_consumed_elements", c->sv_broadcast_vf_elems[s]);
+			  json_int(fd, &k, "total_active_elements_processed", c->velem[s]); }
+		  json_obj_close(fd); }
+	json_obj_close(fd);
+
+	json_obj_open(fd, &f, "movement_profile");
+		{ int h = 1;
+		  json_obj_open(fd, &h, "arithmetic_useful_ops");
+			{ int k = 1;
+			  json_int(fd, &k, "int_ops", c->vint_instr[s]);
+			  json_int(fd, &k, "fp_ops", c->vfp_instr[s]); }
+		  json_obj_close(fd);
+		  json_obj_open(fd, &h, "categories");
+			{ int k = 1;
+			  print_movement_metric(fd, &k, "slides", c, RAVE_MOVEMENT_SLIDES, s);
+			  print_movement_metric(fd, &k, "gathers", c, RAVE_MOVEMENT_GATHERS, s);
+			  print_movement_metric(fd, &k, "compress", c, RAVE_MOVEMENT_COMPRESS, s);
+			  print_movement_metric(fd, &k, "reductions", c, RAVE_MOVEMENT_REDUCTIONS, s);
+			  print_movement_metric(fd, &k, "whole_register", c, RAVE_MOVEMENT_WHOLE_REGISTER, s);
+			  print_movement_metric(fd, &k, "mask_ops_scans", c, RAVE_MOVEMENT_MASK_OPS_SCANS, s);
+			  print_movement_metric(fd, &k, "layout_conversions", c, RAVE_MOVEMENT_LAYOUT_CONVERSIONS, s); }
+		  json_obj_close(fd); }
+	json_obj_close(fd);
+
+	json_obj_open(fd, &f, "policies");
+		{ int h = 1;
+		  json_obj_open(fd, &h, "policy_selection");
+			{ int k = 1;
+			  json_int(fd, &k, "tu_instructions", c->policy_tu_instr[s]);
+			  json_int(fd, &k, "ta_instructions", c->policy_ta_instr[s]);
+			  json_int(fd, &k, "mu_masked_instructions", c->policy_mu_instr[s]);
+			  json_int(fd, &k, "ma_masked_instructions", c->policy_ma_instr[s]); }
+		  json_obj_close(fd);
+		  json_obj_open(fd, &h, "preservation_pressure");
+			{ int k = 1;
+			  json_int(fd, &k, "tail_preserved_elements", c->policy_tail_preserved_elems[s]);
+			  json_int(fd, &k, "mask_preserved_elements", c->policy_mask_preserved_elems[s]);
+			  json_int(fd, &k, "active_written_elements", c->policy_active_written_elems[s]);
+			  json_int(fd, &k, "total_destination_elements", c->policy_total_dest_elems[s]); }
+		  json_obj_close(fd); }
+	json_obj_close(fd);
 	json_pop();
 	json_indent(fd);
 	fputc('}', fd);
@@ -444,6 +515,14 @@ void print_counters_json(FILE * fd, rave_counters * c){
 	 * contadores son por SEW; aqui se agregan todos. */
 	json_obj_open(fd, &f, "masked");
 	{ int h0 = 1;
+	  double masked_active = 0, masked_lanes = 0;
+	  for (int gg = 0; gg < 2; ++gg)
+		for (int s = 0; s < SEWS; ++s){
+			masked_active += c->vmasked_active_elems[gg][s];
+			masked_lanes += c->vmasked_lanes[gg][s];
+		}
+	  json_int(fd, &h0, "masked_active_elements", masked_active);
+	  json_num(fd, &h0, "avg_density", safe_div(masked_active, masked_lanes));
 	  for (int g = 0; g < 2; ++g){
 		/* 0 = load/store, 1 = aritmeticas (mismo orden que vmasked_instr) */
 		const char * nombre = (g == 0) ? "memory" : "arith";

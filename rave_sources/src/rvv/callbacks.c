@@ -15,11 +15,64 @@
 #include "scalar_blocks.h"
 #include "inst_trace.h"
 #include <sched.h>
+#include <string.h>
 
 static void record_vector_register(double * usage, short reg){
 	if (reg >= RAVE_INI_REG_V && reg < RAVE_INI_REG_V + NUM_VECTOR_REGS) {
 		usage[reg - RAVE_INI_REG_V] = 1;
 	}
+}
+
+static int is_vector_reg(int reg){
+	return reg >= RAVE_INI_REG_V && reg < RAVE_INI_REG_V + NUM_VECTOR_REGS;
+}
+
+static int movement_category_for(const instr_data * instr, int whole_register_mem){
+	if (whole_register_mem) return RAVE_MOVEMENT_WHOLE_REGISTER;
+	if (instr->vinstr_idx >= 0){
+		short cat = rave_vinstr_category_of(instr->vinstr_idx);
+		while (cat >= 0){
+			const char * name = rave_vinstr_categories[cat].name;
+			if (!strcmp(name, "slide")) return RAVE_MOVEMENT_SLIDES;
+			if (!strcmp(name, "register_gather")) return RAVE_MOVEMENT_GATHERS;
+			if (!strcmp(name, "compress")) return RAVE_MOVEMENT_COMPRESS;
+			if (!strcmp(name, "vector_reduction")) return RAVE_MOVEMENT_REDUCTIONS;
+			if (!strcmp(name, "whole_register") ||
+			    !strcmp(name, "whole_register_move")) return RAVE_MOVEMENT_WHOLE_REGISTER;
+			if (!strcmp(name, "vector_mask")) return RAVE_MOVEMENT_MASK_OPS_SCANS;
+			if (!strcmp(name, "integer_extension") ||
+			    !strcmp(name, "single_width_type_convert") ||
+			    !strcmp(name, "widening_type_convert") ||
+			    !strcmp(name, "narrowing_type_convert")) return RAVE_MOVEMENT_LAYOUT_CONVERSIONS;
+			cat = rave_vinstr_categories[cat].parent;
+		}
+	}
+	if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_SLIDE))
+		return RAVE_MOVEMENT_SLIDES;
+	if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_GATHER))
+		return RAVE_MOVEMENT_GATHERS;
+	if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_COMPRESS))
+		return RAVE_MOVEMENT_COMPRESS;
+	if (is_subtype(instr->type, T_REDUCTION) ||
+	    is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_REDUCTION))
+		return RAVE_MOVEMENT_REDUCTIONS;
+	if (is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_WHOLE_REGISTER))
+		return RAVE_MOVEMENT_WHOLE_REGISTER;
+	if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_MASK))
+		return RAVE_MOVEMENT_MASK_OPS_SCANS;
+	if (is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_ARITH_WIDENING) ||
+	    is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_ARITH_NARROWING))
+		return RAVE_MOVEMENT_LAYOUT_CONVERSIONS;
+	return -1;
+}
+
+static void count_vector_operands(const instr_data * instr, int * reads, int * writes){
+	*reads = 0;
+	*writes = 0;
+	if (is_vector_reg(instr->src1)) (*reads)++;
+	if (is_vector_reg(instr->src2)) (*reads)++;
+	if (is_vector_reg(instr->src3)) (*reads)++;
+	if (is_vector_reg(instr->dst))  (*writes)++;
 }
 
 inline uint64_t synch_threads(thread_state_t * state){
@@ -290,6 +343,7 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 	//double lmul_value;
 	uint64_t addr = 0;
 	int stride = 0;
+	int is_whole_register_mem = 0;
 
 	int8_t * indexes_8 = NULL;
 	int16_t * indexes_16 = NULL;
@@ -451,6 +505,7 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 #ifndef RVV_07
 			if ((((instr->instr32>>20)&0xFF) == 0x28)){
 				//Whole register load/stre
+					is_whole_register_mem = 1;
 				sew = 0; //sew: 1 byte (8 bits)
 				vl = RAVE_VLMAX / 8; //vl
 			}
@@ -615,8 +670,11 @@ void insn_exec(thread_state_t * state, instr_data * instr){
             vtype = get_vtype(state);
             double real_lmul = 0;
             double real_sew_bits = 8 << sew; // 0,1,2,3 -> SEW 8,16,32,64
-            bool ta = (vtype >> 6) & 0x1; // ta bit
-            //bool ma = (vtype >> 7) & 0x1; // ma bit
+            bool ta = (vtype >> 6) & 0x1; // tail agnostic
+            bool ma = (vtype >> 7) & 0x1; // mask agnostic
+            int masked = is_type_ext(instr->type_ext, TYPE_EXT_MASKED, TYPE_EXT_MASKED);
+            int masked_num_1s = -1;
+            int has_vector_dest = is_vector_reg(instr->dst);
             if (lmul < 4) {
                 real_lmul = (double)(1 << lmul); // 0,1,2,3 -> 1,2,4,8
             } 
@@ -641,15 +699,34 @@ void insn_exec(thread_state_t * state, instr_data * instr){
             double occupancy = (RAVE_VLMAX * real_lmul > 0) ? effective_vl / (RAVE_VLMAX * real_lmul) : 0;
             state->accum_counters.occupancy_accumulated += occupancy;
 
+            double vlmax_elems = RAVE_VLMAX * real_lmul / real_sew_bits;
+            if (has_vector_dest) {
+                if (ta) ++state->accum_counters.policy_ta_instr[sew];
+                else    ++state->accum_counters.policy_tu_instr[sew];
+                state->accum_counters.policy_total_dest_elems[sew] += vlmax_elems;
+                if (!ta && (double)vl < vlmax_elems)
+                    state->accum_counters.policy_tail_preserved_elems[sew] +=
+                        vlmax_elems - (double)vl;
+            }
+
             // Extended type counters.
             if(is_type_ext(instr->type_ext, MASK_EXT_BASE, TYPE_EXT_ARITH)){
                 if(is_type_ext(instr->type_ext, TYPE_EXT_MASKED, TYPE_EXT_MASKED)){
                     state->accum_counters.vmasked_instr[1][sew]++;
                     char * mask = get_vreg(state,0,effective_vl);
-                    int num_1s = count_1s(mask, effective_vl/real_sew_bits);
+                    int lanes = (int)(effective_vl / real_sew_bits);
+                    if (lanes > 0) {
+                        int num_1s = count_1s(mask, lanes);
+                        double density = (double)num_1s / (double)lanes;
+                        state->accum_counters.vmasked_disp[1][sew] += density;
+                        state->accum_counters.vmasked_disp_squared[1][sew] += density * density;
+                        state->accum_counters.vmasked_active_elems[1][sew] += num_1s;
+                        state->accum_counters.vmasked_lanes[1][sew] += lanes;
+                        masked_num_1s = num_1s;
+                    } else {
+                        masked_num_1s = 0;
+                    }
                     free(mask);
-                    state->accum_counters.vmasked_disp[1][sew] += (num_1s/(effective_vl/real_sew_bits));
-                    state->accum_counters.vmasked_disp_squared[1][sew] += (num_1s/(effective_vl/real_sew_bits))*(num_1s/(effective_vl/real_sew_bits));
                 }
                 state->accum_counters.velem_arith[sew] += vl; 
                 if(is_type_ext(instr->type_ext, TYPE_EXT_FP, TYPE_EXT_FP)){
@@ -678,16 +755,26 @@ void insn_exec(thread_state_t * state, instr_data * instr){
                         ++state->accum_counters.vmove_instr[sew];
                         if(is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_WRITE_SCALAR)){
                             ++state->accum_counters.m_inst_v_s[sew];
+                            ++state->accum_counters.sv_vector_to_scalar_instr[sew];
                         } else if(is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_READ_SCALAR)){
                             ++state->accum_counters.m_inst_s_v[sew];
+                            ++state->accum_counters.sv_scalar_to_vector_instr[sew];
                         } else if(is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_WHOLE_REGISTER)){
                             ++state->accum_counters.vmove_wh_instr[sew];
                         }
                     } else {
                         if(is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_WRITE_SCALAR)){
                             ++state->accum_counters.inst_v_s[sew];
+                            ++state->accum_counters.sv_scalar_result_instr[sew];
                         } else if(is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_READ_SCALAR)){
                             ++state->accum_counters.inst_s_v[sew];
+                            if (is_type_ext(instr->type_ext, TYPE_EXT_FP, TYPE_EXT_FP)) {
+                                ++state->accum_counters.sv_broadcast_vf_instr[sew];
+                                state->accum_counters.sv_broadcast_vf_elems[sew] += vl;
+                            } else {
+                                ++state->accum_counters.sv_broadcast_vx_instr[sew];
+                                state->accum_counters.sv_broadcast_vx_elems[sew] += vl;
+                            }
                         }
                         if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_MASK)){
                             ++state->accum_counters.vmask_instr[sew];
@@ -728,10 +815,19 @@ void insn_exec(thread_state_t * state, instr_data * instr){
                 if(is_type_ext(instr->type_ext, TYPE_EXT_MASKED, TYPE_EXT_MASKED)){
                     state->accum_counters.vmasked_instr[0][sew]++;
                     char * mask = get_vreg(state,0,effective_vl);
-                    int num_1s = count_1s(mask, effective_vl/real_sew_bits);
+                    int lanes = (int)(effective_vl / real_sew_bits);
+                    if (lanes > 0) {
+                        int num_1s = count_1s(mask, lanes);
+                        double density = (double)num_1s / (double)lanes;
+                        state->accum_counters.vmasked_disp[0][sew] += density;
+                        state->accum_counters.vmasked_disp_squared[0][sew] += density * density;
+                        state->accum_counters.vmasked_active_elems[0][sew] += num_1s;
+                        state->accum_counters.vmasked_lanes[0][sew] += lanes;
+                        masked_num_1s = num_1s;
+                    } else {
+                        masked_num_1s = 0;
+                    }
                     free(mask);
-                    state->accum_counters.vmasked_disp[0][sew] += num_1s/(effective_vl/real_sew_bits);
-                    state->accum_counters.vmasked_disp_squared[0][sew] += (num_1s/(effective_vl/real_sew_bits))*(num_1s/(effective_vl/real_sew_bits));
                 }
                 state->accum_counters.moved_bytes_v += vl*(1<<(sew));
                 state->accum_counters.velem_mem[sew] += vl;
@@ -761,6 +857,19 @@ void insn_exec(thread_state_t * state, instr_data * instr){
                 } 
                 else if (is_subsubtype(instr->type, T_SPILL)) ++state->accum_counters.vspill_instr[sew];
             }
+            if (masked) {
+                if (ma) ++state->accum_counters.policy_ma_instr[sew];
+                else    ++state->accum_counters.policy_mu_instr[sew];
+            }
+            if (has_vector_dest) {
+                double active = (masked && masked_num_1s >= 0)
+                    ? (double)masked_num_1s : (double)vl;
+                state->accum_counters.policy_active_written_elems[sew] += active;
+                if (masked && !ma && masked_num_1s >= 0)
+                    state->accum_counters.policy_mask_preserved_elems[sew] +=
+                        (double)vl - (double)masked_num_1s;
+            }
+
             // End of extended type counters.
         }else {
             if (is_subtype(instr->type, T_ARITH)){
@@ -796,9 +905,29 @@ void insn_exec(thread_state_t * state, instr_data * instr){
                 else if (is_subsubtype(instr->type, T_SPILL)) ++state->accum_counters.vspill_instr[sew];
             }
         }
+        if (is_subtype(instr->type, T_MEMORY)) {
+            if (is_subsubtype(instr->type, T_UNIT) || is_subsubtype(instr->type, T_SPILL))
+                state->accum_counters.velem_mem_unit[sew] += vl;
+            else if (is_subsubtype(instr->type, T_STRIDE))
+                state->accum_counters.velem_mem_stride[sew] += vl;
+            else if (is_subsubtype(instr->type, T_INDEX))
+                state->accum_counters.velem_mem_indexed[sew] += vl;
+        }
+        {
+            int mcat = movement_category_for(instr, is_whole_register_mem);
+            if (mcat >= 0) {
+                int nreads = 0, nwrites = 0;
+                double bytes = (double)vl * (double)(1ULL << sew);
+                count_vector_operands(instr, &nreads, &nwrites);
+                state->accum_counters.movement_instr[mcat][sew] += 1.0;
+                state->accum_counters.movement_vrf_read[mcat][sew] += bytes * nreads;
+                state->accum_counters.movement_vrf_write[mcat][sew] += bytes * nwrites;
+            }
+        }
 	}else if (is_type(instr->type, T_VSETVL)){ 
 		loop_profile->loop_weight += 1;
 		++state->accum_counters.vsetvl_instr;
+		++state->accum_counters.sv_vsetvl_instr[sew];
 		if (instr->vinstr_idx >= 0)
 			++state->accum_counters.vinstr[instr->vinstr_idx][sew];
 	}

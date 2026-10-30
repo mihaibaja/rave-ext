@@ -140,9 +140,31 @@ sew_block
 ├── instr          instrucciones vectoriales ejecutadas con ese SEW
 ├── elems          elementos procesados por esas instrucciones
 ├── avg_vl         elems / instr   (0 si instr = 0)
-├── elems_by_kind  { arith, memory, reduction, mask }   elementos por tipo
+├── elems_by_kind
+│   ├── arith
+│   ├── memory { unit_stride, strided, indexed }
+│   ├── reduction
+│   └── mask
 ├── avg_stride_b       stride medio (bytes) de los accesos strided
-└── stddev_stride_b    desviación típica de ese stride
+├── stddev_stride_b    desviación típica de ese stride
+├── scalar_vector_interface
+│   ├── events_count { broadcast_vx, broadcast_vf, scalar_to_vector,
+│   │                  vector_to_scalar, scalar_result, vsetvl_config }
+│   └── elements_affected { broadcast_vx_consumed_elements,
+│                           broadcast_vf_consumed_elements,
+│                           total_active_elements_processed }
+├── movement_profile
+│   ├── arithmetic_useful_ops { int_ops, fp_ops }
+│   └── categories { slides, gathers, compress, reductions,
+│                    whole_register, mask_ops_scans, layout_conversions }
+│       (cada categoría: { instr, vrf_bytes_read, vrf_bytes_written })
+└── policies
+    ├── policy_selection { tu_instructions, ta_instructions,
+    │                      mu_masked_instructions, ma_masked_instructions }
+    └── preservation_pressure { tail_preserved_elements,
+                                mask_preserved_elements,
+                                active_written_elements,
+                                total_destination_elements }
 ```
 
 Son **estadísticas por SEW**: hasta el 2026-10-16 cada bloque llevaba además los
@@ -151,19 +173,20 @@ eliminado porque se solapaban entre sí y con las categorías (§1.7). El detall
 *qué instrucciones* se han ejecutado está en el **árbol de categorías** de la
 región (§1.4.1), que sí es una partición.
 
-Dos cosas **no** se pueden deducir del árbol (cuenta instrucciones, no elementos) y
-por eso siguen aquí:
+`elems_by_kind.memory` desglosa los elementos de memoria en `unit_stride`,
+`strided` e `indexed`; los accesos whole-register y spill se contabilizan como
+`unit_stride`. Los tipos de `elems_by_kind` **se solapan** —una instrucción de
+máscara suma a la vez en `arith` y en `mask`—, así que su suma puede superar
+`elems`; cada uno por separado nunca pasa de `elems`.
 
-* `elems_by_kind`: elementos procesados por tipo de operación. Los tipos **se
-  solapan** —una instrucción de máscara suma a la vez en `arith` y en `mask`—, así
-  que la suma de los cuatro puede superar `elems`; cada uno por separado nunca
-  pasa de `elems`.
-* `avg_stride_b` / `stddev_stride_b`: medias internas de los accesos strided
-  (`0` si no hubo ninguno).
+`scalar_vector_interface` cuenta los cruces escalar-vector y los elementos
+consumidos por broadcasts. `movement_profile` agrupa las instrucciones de
+movimiento interno (slides, gathers, compress, reducciones, whole-register,
+máscaras/scans y conversiones de layout) y los bytes leídos/escritos en el VRF.
+`policies` mide la selección tail/mask y la presión de preservación; sus valores
+dependen de `trace_extended` y valen `0` si no se tomó la traza extendida.
 
-Los siete campos se calculan siempre, con o sin `trace_extended`.
-
-Estos cuatro campos se calculan siempre, con o sin `trace_extended`.
+Todos los campos se emiten siempre, con o sin `trace_extended`.
 
 ### 1.4.1 Contadores por instrucción (niveles del listado)
 
@@ -259,16 +282,21 @@ media y desviación típica. Se separan dos categorías:
 
 ```json
 "masked": {
+  "masked_active_elements": 6,
+  "avg_density": 0.60,
   "arith":  { "instr": 1, "avg_density": 0.50, "stddev_density": 0.00 },
   "memory": { "instr": 1, "avg_density": 0.50, "stddev_density": 0.00 }
 }
 ```
 
+* `masked_active_elements` = suma de todos los elementos activos ejecutados bajo
+  máscara; `avg_density` = esa suma dividida entre los lanes procesados bajo
+  máscara (densidad global, no media de medias).
 * `instr` = número de instrucciones enmascaradas de esa categoría (sumado sobre
   todos los SEW); `avg_density` ∈ [0,1]; `stddev_density` = dispersión de esas
   densidades.
 * **Sólo hay datos con `trace_extended`** (la clasificación usa `type_ext`); sin
-  él el bloque sale vacío.
+  él los dos campos globales valen `0` y no aparecen `arith`/`memory`.
 * Opcional en el esquema: los JSON anteriores al 2026-10-18 no lo traen.
 
 ### 1.7 Sumas que se pueden hacer (y cuáles no)
@@ -425,6 +453,7 @@ escritor JSON tiene que reflejarse aquí (y en `schema/profiler_json_schema_v1.j
 | Fecha | Cambio en RAVE | Efecto en el contrato |
 |---|---|---|
 | 2026-10-30 | `gen_instr_counters.py` + `counters.c`: se deshace el colapso de las indexadas | Las instrucciones indexadas vuelven a emitirse por separado en `indexed` e `indexed_segment`, cada una con su `<mnemonico>_counter`; `memory_addresses` incluye ambas ramas |
+| 2026-10-30 | `callbacks.c` + `counters.c`: métricas del schema extendido | Nuevos campos por SEW: `elems_by_kind.memory` desglosado, `scalar_vector_interface`, `movement_profile` y `policies`; `counters.masked` añade `masked_active_elements` y `avg_density`; la raíz emite `RAW_DIST`, `WAW_DIST` y `WAR_DIST` |
 | 2026-10-16 | `instr_counters.c` (nuevo) + `instr_data.c` + `callbacks.c`: contador propio por cada instrucción vectorial (630), con `_counter` en el nombre; `gen_instr_counters.py` los agrupa con los niveles de `docs/rvv instr.md` | **Rediseño del contrato (v2)**: los contadores por instrucción pasan a `region.instructions`, con las categorías del listado (§1.4.1), que forman una partición. El bloque de recuentos anterior se conserva en `counters.instructions_previous_version` (§1.1); desaparecen sus desgloses por SEW `arith`/`memory`/`reduction`/`mask`/`other` y los contadores agregados (`vunit_instr`, `vint_instr`…), que se recalculan sumando categorías (§1.7). El bloque SEW se queda con las estadísticas y con lo que **no** se deduce del árbol: `elems_by_kind` y `avg_stride_b`/`stddev_stride_b` (§1.4) |
 | 2026-10-18 | merge de `24c83b9` (mask metrics) | **`counters.masked`** (§1.6): instrucciones enmascaradas y densidad media de la máscara por categoría (arith / memory), sólo con `trace_extended`. La rama original sólo lo sacaba por el informe de texto |
 | 2026-10-18 | `gen_instr_counters.py` (sumas por prefijo) + `callbacks.c` (rango de direcciones) | **Indexadas colapsadas**: `indexed.load` / `indexed.store` suman todos los encodings (también las segmentadas indexadas, que pierden su nodo). Nuevo bloque opcional `counters.memory_addresses` (§1.5): media del rango `max−min` por instrucción indexada, con el mismo peso para todas al agregar. Revertido el 2026-10-30 |

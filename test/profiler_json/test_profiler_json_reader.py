@@ -197,8 +197,12 @@ class TestProfilerJsonSchema(unittest.TestCase):
         # tampoco (cada tipo por separado si esta acotado).
         doc = minimal()
         block = sew_blocks(doc)[0]
-        block["elems_by_kind"] = {"arith": block["elems"], "memory": 0,
-                                  "reduction": 0, "mask": block["elems"]}
+        block["elems_by_kind"] = {
+            "arith": block["elems"],
+            "memory": {"unit_stride": 0, "strided": 0, "indexed": 0},
+            "reduction": 0,
+            "mask": block["elems"],
+        }
         self.assertEqual(validate_document(doc, self.schema), [])
         self.assertEqual(check_invariants(doc), ([], []))
 
@@ -225,13 +229,15 @@ class TestProfilerJsonInvariants(unittest.TestCase):
 
     def test_elems_by_kind_cannot_exceed_elems(self):
         doc = minimal()
-        sew_blocks(doc)[0]["elems_by_kind"]["memory"] = 999
+        sew_blocks(doc)[0]["elems_by_kind"]["memory"]["unit_stride"] = 999
         errors, _ = check_invariants(doc)
         self.assertTrue(any("elems_by_kind.memory" in e for e in errors), errors)
 
     def test_masked_metrics_are_reported(self):
         doc = minimal()
         counters(doc)["masked"] = {
+            "masked_active_elements": 6,
+            "avg_density": 0.6,
             "arith": {"instr": 4, "avg_density": 0.5, "stddev_density": 0.1},
             "memory": {"instr": 2, "avg_density": 1.0, "stddev_density": 0.0},
         }
@@ -242,6 +248,8 @@ class TestProfilerJsonInvariants(unittest.TestCase):
     def test_masked_density_must_be_a_fraction(self):
         doc = minimal()
         counters(doc)["masked"] = {
+            "masked_active_elements": 1,
+            "avg_density": 0.5,
             "arith": {"instr": 1, "avg_density": 1.5, "stddev_density": 0},
         }
         self.assertTrue(any("avg_density" in e
@@ -327,7 +335,7 @@ class TestReaderApi(unittest.TestCase):
     def test_summary_includes_categories_and_top_instructions(self):
         lines = summarize(sample())
         self.assertTrue(any("por categoria:" in line for line in lines), lines)
-        self.assertTrue(any("vector_loads_and_stores=22008" in line for line in lines),
+        self.assertTrue(any("vector_loads_and_stores=318" in line for line in lines),
                         lines)
         self.assertTrue(any("top_instr:" in line for line in lines), lines)
 
@@ -340,7 +348,7 @@ class TestReaderApi(unittest.TestCase):
         lines = dump(sample())
         self.assertTrue(any(line.strip() == "vector_loads_and_stores:" for line in lines),
                         lines)
-        self.assertTrue(any("vle64_v_counter=22008" in line for line in lines), lines)
+        self.assertTrue(any("vle64_v_counter=212" in line for line in lines), lines)
 
     def test_instruction_tree_has_only_the_categories(self):
         self.assertNotIn("counters", tree(sample()))
@@ -351,15 +359,15 @@ class TestReaderApi(unittest.TestCase):
 
     def test_instruction_counters_flattens_the_tree(self):
         counted = instruction_counters(region(sample()))
-        self.assertEqual(counted["vle64_v_counter"], 22008)
-        self.assertEqual(counted["vfmacc_vf_counter"], 10000)
-        self.assertEqual(len(counted), 6)
+        self.assertEqual(counted["vle64_v_counter"], 212)
+        self.assertEqual(counted["vfmacc_vv_counter"], 106)
+        self.assertEqual(len(counted), 10)
 
     def test_category_totals_sums_each_section(self):
         totals = category_totals(region(sample()))
-        self.assertEqual(totals["configuration_setting"], 22009)
-        self.assertEqual(totals["vector_floating_point"], 30000)
-        self.assertEqual(sum(totals.values()), 80698)
+        self.assertEqual(totals["configuration_setting"], 319)
+        self.assertEqual(totals["vector_floating_point"], 106)
+        self.assertEqual(sum(totals.values()), 1168)
 
 
 if __name__ == "__main__":

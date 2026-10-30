@@ -309,6 +309,13 @@ def check_invariants(doc):
             elems = block.get("elems")
             if isinstance(elems, (int, float)):
                 for kind, value in sorted(by_kind.items()):
+                    if kind == "memory" and isinstance(value, dict):
+                        total_mem = sum(v for v in value.values()
+                                        if isinstance(v, (int, float)))
+                        if total_mem > elems + TOLERANCE:
+                            errors.append(f"{sew_where}: elems_by_kind.memory "
+                                          f"({total_mem}) > elems ({elems})")
+                        continue
                     if isinstance(value, (int, float)) and value > elems + TOLERANCE:
                         errors.append(f"{sew_where}: elems_by_kind.{kind} ({value}) > "
                                       f"elems ({elems})")
@@ -409,16 +416,28 @@ def dump(doc):
                      f"vector={instructions.get('vector')}")
         for block in instructions.get("sew") or []:
             kinds = block.get("elems_by_kind") or {}
+            mem = kinds.get("memory")
+            if isinstance(mem, dict):
+                mem_txt = (f"{mem.get('unit_stride', 0)}/"
+                           f"{mem.get('strided', 0)}/{mem.get('indexed', 0)}")
+            else:
+                mem_txt = str(mem or 0)
             lines.append(f"  sew={block.get('sew'):>2}  instr={block.get('instr'):>8} "
                          f"elems={block.get('elems'):>10} avg_vl={block.get('avg_vl'):>8} "
-                         f"| elems arith/mem/red/mask="
-                         f"{kinds.get('arith', 0)}/{kinds.get('memory', 0)}/"
+                         f"| elems arith/mem(unit/stride/idx)/red/mask="
+                         f"{kinds.get('arith', 0)}/{mem_txt}/"
                          f"{kinds.get('reduction', 0)}/{kinds.get('mask', 0)} "
                          f"| stride={block.get('avg_stride_b', 0)}"
                          f"±{block.get('stddev_stride_b', 0)}")
 
         masked = (region.get("counters") or {}).get("masked") or {}
+        if isinstance(masked, dict) and (
+                "masked_active_elements" in masked or "avg_density" in masked):
+            lines.append(f"  masked global: active={masked.get('masked_active_elements', 0)} "
+                         f"avg_density={masked.get('avg_density', 0):.2f}")
         for cat, r in masked.items():
+            if not isinstance(r, dict):
+                continue
             lines.append(f"  masked {cat}: instr={r['instr']} "
                          f"avg_density={r['avg_density']:.2f} "
                          f"stddev={r['stddev_density']:.2f}")
