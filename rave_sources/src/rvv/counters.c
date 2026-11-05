@@ -11,6 +11,12 @@
 #include "state.h"
 #include <math.h>
 
+static double dependency_count(const double dependency_bins[9]){
+	double count = 0;
+	for (int i=0; i<9; ++i) count += dependency_bins[i];
+	return count;
+}
+
 void print_counters_human(FILE * fd, rave_counters * counters){
 	double scalinstr = counters->scalar_instr + counters->vsetvl_instr;
 	double vecinstr = 0;
@@ -48,38 +54,27 @@ void print_counters_human(FILE * fd, rave_counters * counters){
         indent(fd,  level,0); fprintf(fd,"tu/ta effective vector instructions: "); P_NUMBER(fd, "%.0f", counters->tu_count); fprintf(fd, " / "); P_NUMBER(fd, "%.0f", counters->ta_count); fprintf(fd, "\n");
         indent(fd,  level,1); fprintf(fd,"Unique vector registers: "); P_NUMBER(fd, "%.0f", unique_vector_registers); fprintf(fd,"\n");
         //Print dependences
-        if(RAW_DIST || WAR_DIST || WAW_DIST){
-            double sdep = counters->RAW_deps+counters->WAR_deps+counters->WAW_deps;
-            double vdep = counters->VRAW_deps+counters->VWAR_deps+counters->VWAW_deps;
-            indent(fd,--level,0); fprintf(fd,"Dependencies: "); fprintf(fd,"\n");
+        double sdep = counters->RAW_deps+counters->WAR_deps+counters->WAW_deps;
+        double vraw = dependency_count(counters->VRAW_deps);
+        double vwar = dependency_count(counters->VWAR_deps);
+        double vwaw = dependency_count(counters->VWAW_deps);
+        double vdep = vraw + vwar + vwaw;
+        indent(fd,--level,0); fprintf(fd,"Dependencies: "); fprintf(fd,"\n");
+        ++level;
+        if(TRACE_SCALAR || sdep > 0){
+            indent(fd,  level,0); fprintf(fd,"Vector With Scalar: "); P_NUMBER(fd, "%.0f", sdep); fprintf(fd,"\n");
             ++level;
-            if(TRACE_SCALAR || sdep > 0){
-                indent(fd,  level,0); fprintf(fd,"Vector With Scalar: "); P_NUMBER(fd, "%.0f", sdep); fprintf(fd,"\n");
-                ++level;
-                if(RAW_DIST){
-                    indent(fd,  level,0); fprintf(fd,"RAW: "); P_NUMBER(fd, "%.0f", counters->RAW_deps);fprintf(fd,"\n");
-                }
-                if(WAW_DIST){
-                    indent(fd,  level,0); fprintf(fd,"WAW: "); P_NUMBER(fd, "%.0f", counters->WAW_deps); fprintf(fd,"\n");
-                }
-                if(WAR_DIST){
-                    indent(fd,  level,1); fprintf(fd,"WAR: "); P_NUMBER(fd, "%.0f", counters->WAR_deps); fprintf(fd,"\n");
-                }
-                --level;
-            }
-            indent(fd,  level,1); fprintf(fd,"Vector: "); P_NUMBER(fd, "%.0f", vdep); fprintf(fd,"\n");
-            ++level;
-            if(RAW_DIST){
-                indent(fd,  level,0); fprintf(fd,"RAW: "); P_NUMBER(fd, "%.0f", counters->VRAW_deps); fprintf(fd, " [avg dist.: "); P_NUMBER(fd, "%.2f", counters->VRAW_deps?counters->avg_VRAW_deps/counters->VRAW_deps:0); fprintf(fd, "]"); fprintf(fd,"\n");
-            }
-            if(WAW_DIST){
-                indent(fd,  level,0); fprintf(fd,"WAW: "); P_NUMBER(fd, "%.0f", counters->VWAW_deps); fprintf(fd, " [avg dist.: "); P_NUMBER(fd, "%.2f", counters->VWAW_deps?counters->avg_VWAW_deps/counters->VWAW_deps:0); fprintf(fd, "]"); fprintf(fd,"\n");
-            }
-            if(WAR_DIST){
-                indent(fd,  level,1); fprintf(fd,"WAR: "); P_NUMBER(fd, "%.0f", counters->VWAR_deps); fprintf(fd, " [avg dist.: "); P_NUMBER(fd, "%.2f", counters->VWAR_deps?counters->avg_VWAR_deps/counters->VWAR_deps:0); fprintf(fd, "]"); fprintf(fd,"\n");
-            }
+            indent(fd,  level,0); fprintf(fd,"RAW: "); P_NUMBER(fd, "%.0f", counters->RAW_deps);fprintf(fd,"\n");
+            indent(fd,  level,0); fprintf(fd,"WAW: "); P_NUMBER(fd, "%.0f", counters->WAW_deps); fprintf(fd,"\n");
+            indent(fd,  level,1); fprintf(fd,"WAR: "); P_NUMBER(fd, "%.0f", counters->WAR_deps); fprintf(fd,"\n");
             --level;
         }
+        indent(fd,  level,1); fprintf(fd,"Vector: "); P_NUMBER(fd, "%.0f", vdep); fprintf(fd,"\n");
+        ++level;
+        indent(fd,  level,0); fprintf(fd,"RAW: "); P_NUMBER(fd, "%.0f", vraw); fprintf(fd, " [avg dist.: "); P_NUMBER(fd, "%.2f", vraw ? counters->avg_VRAW_deps/vraw : 0); fprintf(fd, "]"); fprintf(fd,"\n");
+        indent(fd,  level,0); fprintf(fd,"WAW: "); P_NUMBER(fd, "%.0f", vwaw); fprintf(fd, " [avg dist.: "); P_NUMBER(fd, "%.2f", vwaw ? counters->avg_VWAW_deps/vwaw : 0); fprintf(fd, "]"); fprintf(fd,"\n");
+        indent(fd,  level,1); fprintf(fd,"WAR: "); P_NUMBER(fd, "%.0f", vwar); fprintf(fd, " [avg dist.: "); P_NUMBER(fd, "%.2f", vwar ? counters->avg_VWAR_deps/vwar : 0); fprintf(fd, "]"); fprintf(fd,"\n");
+        --level;
     }
 
 	//Print general counters
@@ -497,15 +492,18 @@ void print_counters_json(FILE * fd, rave_counters * c){
 	json_obj_close(fd);
 	json_obj_open(fd, &g, "vector");
 		{ int h = 1;
-		  json_int(fd,&h,"total",c->VRAW_deps + c->VWAR_deps + c->VWAW_deps);
+		  double vraw = dependency_count(c->VRAW_deps);
+		  double vwaw = dependency_count(c->VWAW_deps);
+		  double vwar = dependency_count(c->VWAR_deps);
+		  json_int(fd,&h,"total",vraw + vwar + vwaw);
 		  json_obj_open(fd,&h,"raw");
-			{ int k = 1; json_int(fd,&k,"count",c->VRAW_deps); json_num(fd,&k,"avg_dist",safe_div(c->avg_VRAW_deps, c->VRAW_deps)); }
+			{ int k = 1; json_int(fd,&k,"count",vraw); json_num(fd,&k,"avg_dist",safe_div(c->avg_VRAW_deps, vraw)); }
 		  json_obj_close(fd);
 		  json_obj_open(fd,&h,"waw");
-			{ int k = 1; json_int(fd,&k,"count",c->VWAW_deps); json_num(fd,&k,"avg_dist",safe_div(c->avg_VWAW_deps, c->VWAW_deps)); }
+			{ int k = 1; json_int(fd,&k,"count",vwaw); json_num(fd,&k,"avg_dist",safe_div(c->avg_VWAW_deps, vwaw)); }
 		  json_obj_close(fd);
 		  json_obj_open(fd,&h,"war");
-			{ int k = 1; json_int(fd,&k,"count",c->VWAR_deps); json_num(fd,&k,"avg_dist",safe_div(c->avg_VWAR_deps, c->VWAR_deps)); }
+			{ int k = 1; json_int(fd,&k,"count",vwar); json_num(fd,&k,"avg_dist",safe_div(c->avg_VWAR_deps, vwar)); }
 		  json_obj_close(fd); }
 	json_obj_close(fd);
 	json_obj_close(fd);

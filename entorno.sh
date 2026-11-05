@@ -13,5 +13,5 @@ export RAVE_DEBUG_INFO=0
 # Salida JSON del reporte (opcional).
 #   RAVE_PRINT_JSON=1  activa el volcado JSON.
 #   RAVE_JSON_NAME     fichero de salida (si esta vacio, se usa <binario>_rave.json).
-export RAVE_PRINT_JSON=0
-export RAVE_JSON_NAME=
+export RAVE_PRINT_JSON=1
+export RAVE_JSON_NAME=rave_inst_trace.json

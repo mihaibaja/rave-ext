@@ -43,6 +43,7 @@ char * INST_TRACE_NAME = NULL;
 FILE * FD_INST_TRACE = NULL;
 char DEBUG_INFO = 0;
 int RAW_DIST = 8;
+int RAW_DIST_CHAINING = 8;
 int WAR_DIST = 20;
 int WAW_DIST = 8;
 uint64_t base;
@@ -143,9 +144,27 @@ void reset_thread(int cpu_index){
 	memset(state->read_reg_deps, 0, sizeof(state->read_reg_deps));
 	memset(state->inst_trace_last_write, 0, sizeof(state->inst_trace_last_write));
 	memset(state->inst_trace_last_read, 0, sizeof(state->inst_trace_last_read));
+    memset(state->accum_counters.VRAW_deps, 0, sizeof(state->accum_counters.VRAW_deps));
+    memset(state->accum_counters.VWAR_deps, 0, sizeof(state->accum_counters.VWAR_deps));
+    memset(state->accum_counters.VWAW_deps, 0, sizeof(state->accum_counters.VWAW_deps));
+    memset(state->accum_counters.RAW_MATRIX_PC, 0, sizeof(state->accum_counters.RAW_MATRIX_PC));
 	
 	//Musa:
 	state -> prev_dst = 0;
+
+    state->accum_counters.total_VRAW_deps = 0;
+    state->accum_counters.total_VWAR_deps = 0;
+    state->accum_counters.total_VWAW_deps = 0;
+    state->accum_counters.avg_VRAW_deps   = 0;
+    state->accum_counters.avg_VWAR_deps   = 0;
+    state->accum_counters.avg_VWAW_deps   = 0;
+
+    state->accum_counters.RAW_deps = 0;
+    state->accum_counters.WAR_deps = 0;
+    state->accum_counters.WAW_deps = 0;
+
+    state->accum_counters.v_pos = 0;
+    state->accum_counters.g_pos = 0;
 	
 	setup_regs(cpu_index);
 

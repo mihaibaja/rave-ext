@@ -458,9 +458,6 @@ void print_region_json(FILE * fd, int accumulate){
 	json_int(fd, &first, "vlen_bits", RAVE_VLMAX);
 	json_bool(fd, &first, "trace_extended", TRACE_EXTENDED);
 	json_bool(fd, &first, "accumulate_regions", accumulate);
-	json_bool(fd, &first, "RAW_DIST", RAW_DIST > 0);
-	json_bool(fd, &first, "WAW_DIST", WAW_DIST > 0);
-	json_bool(fd, &first, "WAR_DIST", WAR_DIST > 0);
 	json_int(fd, &first, "region_count", track_regions.total_regions);
 	json_arr_open(fd, &first, "regions");
 	{

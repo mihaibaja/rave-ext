@@ -38,6 +38,7 @@ extern char * INST_TRACE_NAME;
 extern FILE * FD_INST_TRACE;
 extern char DEBUG_INFO;
 extern int RAW_DIST;
+extern int RAW_DIST_CHAINING;
 extern int WAR_DIST;
 extern int WAW_DIST;
 extern uint64_t base;
@@ -67,8 +68,8 @@ extern FILE * FD_CALLTRACE;
 	
 typedef struct inst_compressed_t inst_compressed_t;
 struct inst_compressed_t {
-    char * asm_string;
     uint64_t pos;
+    uint64_t g_pos;
     uint16_t type;
 };
 
