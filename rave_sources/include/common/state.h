@@ -104,6 +104,16 @@ struct thread_state_t{
     struct inst_compressed_t write_reg_deps[96];
     struct inst_compressed_t read_reg_deps[96];
 
+    // Circular buffer for windowed RAW dependency tracking (W <= 16)
+    struct {
+        short dst_d;
+        short src1_d;
+        short src2_d;
+        short src3_d;
+    } rvv_raw_win[16];
+    int rvv_raw_win_idx;
+    int rvv_raw_win_len;
+
     uint64_t inst_trace_last_write[96];
     uint64_t inst_trace_last_read[96];
 

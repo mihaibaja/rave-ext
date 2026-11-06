@@ -265,9 +265,9 @@ uint16_t instr_set_vector_type_ext(uint32_t insn_opcode, char* instr_asm, uint16
             }
 
             /** REDUCTION INSTRUCTIONS */
+            fprintf(stdout, "Reduction instruction possible: %s; funct3: %d, funct6: %d\n", instr_asm, funct3, funct6);
             if (funct3 == 2 && ((funct6 >= 0 && funct6 <= 7) || funct6 == 0x30 || funct6 == 0x31)) {   
                 /**OPMVV: 010 
-                 * f6 == 0x30 y 0x31: vwredsumu y vwredsum
                  * others: vredsum, vredand, vredor, vredxor, vredminu, vredmin, vredmaxu, vredmax
                 */
                 type_ext &= ~MASK_EXT_SUBSUBTYPE;
@@ -282,7 +282,12 @@ uint16_t instr_set_vector_type_ext(uint32_t insn_opcode, char* instr_asm, uint16
                 type_ext &= ~MASK_EXT_SUBSUBTYPE;
                 type_ext |= TYPE_EXT_ARITH_REDUCTION;
                 type_ext |= TYPE_EXT_FP;     
-            } 
+            } else if(funct3 == 0 && (funct6 == 0b110000 || funct6 == 0b110001)) {
+                /** OPIVV: vwredsumu y vwredsum */
+                type_ext &= ~MASK_EXT_SUBSUBTYPE;
+                type_ext |= TYPE_EXT_ARITH_REDUCTION;
+                type_ext |= TYPE_EXT_INT;     
+            }
 
             /** SLIDE INSTRUCTIONS */
             else if (funct6 == 14 || funct6 == 15) {   

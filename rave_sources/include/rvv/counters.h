@@ -139,6 +139,10 @@ struct rave_counters{
                  */
                 double RAW_MATRIX_PC[8][8]; 
 
+                /* Paralelismo disponible: ventanas W = 2, 4, 8, 16 */
+                double par_avail_sum[4];
+                double par_avail_count[4];
+
                 // To track the number of (effective) times we've had ta vs tu
                 double ta_count;
                 double tu_count;

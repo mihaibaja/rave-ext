@@ -144,6 +144,9 @@ void reset_thread(int cpu_index){
 	memset(state->read_reg_deps, 0, sizeof(state->read_reg_deps));
 	memset(state->inst_trace_last_write, 0, sizeof(state->inst_trace_last_write));
 	memset(state->inst_trace_last_read, 0, sizeof(state->inst_trace_last_read));
+	memset(state->rvv_raw_win, 0, sizeof(state->rvv_raw_win));
+	state->rvv_raw_win_idx = 0;
+	state->rvv_raw_win_len = 0;
     memset(state->accum_counters.VRAW_deps, 0, sizeof(state->accum_counters.VRAW_deps));
     memset(state->accum_counters.VWAR_deps, 0, sizeof(state->accum_counters.VWAR_deps));
     memset(state->accum_counters.VWAW_deps, 0, sizeof(state->accum_counters.VWAW_deps));

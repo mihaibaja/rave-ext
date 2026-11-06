@@ -170,7 +170,7 @@ void print_counters_human(FILE * fd, rave_counters * counters){
                     indent(fd,  level,0); fprintf(fd,"Widening: "); P_NUMBER(fd,"%.0f", counters->vwidening_instr[s]); PERCENTAGE(fd,counters->vwidening_instr[s], totvarith,'\n');
                     if(counters->vwidening_instr[s] > 0) {
                         double totvred = counters->vfp_reductions[s] + counters->vint_reductions[s];
-                        indent(fd,++level,0); fprintf(fd,"Reductions: "); P_NUMBER(fd,"%.0f",totvred); PERCENTAGE(fd,totvred, counters->vwidening_instr[s],totvred>0?' ':'\n');
+                        indent(fd,++level,0); fprintf(fd,"Reductions: "); P_NUMBER(fd,"%.0f",totvred); PERCENTAGE(fd,totvred, counters->vwidening_instr[s],'\n');
                         if(totvred){
                             indent(fd,++level,0); fprintf(fd,"FP: "); P_NUMBER(fd,"%.0f",counters->vfp_reductions[s]); PERCENTAGE(fd,counters->vfp_reductions[s], totvred, '\n');
                             indent(fd,  level,1); fprintf(fd,"INT: "); P_NUMBER(fd,"%.0f",counters->vint_reductions[s]); PERCENTAGE(fd,counters->vint_reductions[s], totvred, '\n');
@@ -444,6 +444,128 @@ static void print_sew_json(FILE * fd, rave_counters * c, int s){
 	fputc('}', fd);
 }
 
+static double compute_percentile(const double bins[9], double total_count, double target_pct){
+	if (total_count <= 0) return 0.0;
+	double target = target_pct * total_count;
+	double cum = 0.0;
+
+	static const double bin_low[9]  = { 1.0, 2.0, 3.0, 4.0, 5.0,  9.0, 17.0, 33.0, 65.0 };
+	static const double bin_high[9] = { 1.0, 2.0, 3.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0 };
+
+	for (int i = 0; i < 9; ++i){
+		if (bins[i] <= 0) continue;
+		if (cum + bins[i] >= target){
+			double frac = (target - cum) / bins[i];
+			if (bin_low[i] == bin_high[i]) return bin_low[i];
+			return bin_low[i] + frac * (bin_high[i] - bin_low[i]);
+		}
+		cum += bins[i];
+	}
+	return 128.0;
+}
+
+static void print_dep_vector_json(FILE * fd, int * first, const char * name,
+                                  double count, double avg_dist,
+                                  const double bins[9]){
+	int h = 1;
+	json_obj_open(fd, first, name);
+	json_int(fd, &h, "count", count);
+	json_num(fd, &h, "avg_dist", safe_div(avg_dist, count));
+
+	/* Histograma de distancias: bins 1, 2, 3, 4, 5-8, 9-16, 17-32, >32 */
+	json_obj_open(fd, &h, "histogram");
+	{
+		int k = 1;
+		json_int(fd, &k, "1", bins[0]);
+		json_int(fd, &k, "2", bins[1]);
+		json_int(fd, &k, "3", bins[2]);
+		json_int(fd, &k, "4", bins[3]);
+		json_int(fd, &k, "5-8", bins[4]);
+		json_int(fd, &k, "9-16", bins[5]);
+		json_int(fd, &k, "17-32", bins[6]);
+		json_int(fd, &k, ">32", bins[7] + bins[8]);
+	}
+	json_obj_close(fd);
+
+	/* Distribución acumulada (CDF: fracción acumulada 0..1 en distancias <= X) */
+	json_obj_open(fd, &h, "cdf");
+	{
+		int k = 1;
+		double c1 = bins[0];
+		double c2 = c1 + bins[1];
+		double c4 = c2 + bins[2] + bins[3];
+		double c8 = c4 + bins[4];
+		double c16 = c8 + bins[5];
+		double c32 = c16 + bins[6];
+		double c64 = c32 + bins[7];
+		json_num(fd, &k, "1", safe_div(c1, count));
+		json_num(fd, &k, "2", safe_div(c2, count));
+		json_num(fd, &k, "4", safe_div(c4, count));
+		json_num(fd, &k, "8", safe_div(c8, count));
+		json_num(fd, &k, "16", safe_div(c16, count));
+		json_num(fd, &k, "32", safe_div(c32, count));
+		json_num(fd, &k, "64", safe_div(c64, count));
+	}
+	json_obj_close(fd);
+
+	/* Percentiles de distancia: Mediana (P50), P90 y P99 */
+	json_obj_open(fd, &h, "percentiles");
+	{
+		int k = 1;
+		json_num(fd, &k, "median", compute_percentile(bins, count, 0.50));
+		json_num(fd, &k, "p90", compute_percentile(bins, count, 0.90));
+		json_num(fd, &k, "p99", compute_percentile(bins, count, 0.99));
+	}
+	json_obj_close(fd);
+
+	json_obj_close(fd);
+}
+
+static void print_raw_matrix_pc_json(FILE * fd, int * first, const double matrix[8][8]){
+	static const char * const prods[8] = {
+		"load", "int_arith", "fp_arith", "fused",
+		"permutation", "reduction", "mask", "scalar_to_vector"
+	};
+	static const char * const cons[8] = {
+		"store", "int_arith", "fp_arith", "fused",
+		"permutation", "reduction", "mask", "vector_to_scalar"
+	};
+	int h = 1;
+	json_obj_open(fd, first, "class_pairs");
+	json_obj_open(fd, &h, "raw_counts");
+	int raw_first = 1;
+	for (int p = 0; p < 8; ++p){
+		int row_first = 1;
+		json_obj_open(fd, &raw_first, prods[p]);
+		for (int c = 0; c < 8; ++c){
+			json_int(fd, &row_first, cons[c], matrix[p][c]);
+		}
+		json_obj_close(fd);
+	}
+	json_obj_close(fd);
+	json_obj_close(fd);
+}
+
+static void print_parallelism_available_json(FILE * fd, int * first, const rave_counters * c) {
+	static const int win_sizes[4] = {2, 4, 8, 16};
+	int f_par = 1;
+	json_obj_open(fd, first, "parallelism_available");
+	for (int w = 0; w < 4; w++) {
+		double avg_p = 0.0;
+		if (c->par_avail_count[w] > 0.0) {
+			avg_p = c->par_avail_sum[w] / c->par_avail_count[w];
+		} else if (c->v_pos > 0.0) {
+			avg_p = (c->v_pos < (double)win_sizes[w]) ? c->v_pos : (double)win_sizes[w];
+		}
+		if (avg_p > (double)win_sizes[w]) avg_p = (double)win_sizes[w];
+		if (avg_p < 0.0) avg_p = 0.0;
+		char key[8];
+		snprintf(key, sizeof(key), "%d", win_sizes[w]);
+		json_num(fd, &f_par, key, avg_p);
+	}
+	json_obj_close(fd);
+}
+
 void print_counters_json(FILE * fd, rave_counters * c){
 	double vecinstr = 0, unique_regs = 0, vl_accum = 0, totinstr, totbytes, totflops;
 	int f = 1, g;
@@ -495,16 +617,13 @@ void print_counters_json(FILE * fd, rave_counters * c){
 		  double vraw = dependency_count(c->VRAW_deps);
 		  double vwaw = dependency_count(c->VWAW_deps);
 		  double vwar = dependency_count(c->VWAR_deps);
-		  json_int(fd,&h,"total",vraw + vwar + vwaw);
-		  json_obj_open(fd,&h,"raw");
-			{ int k = 1; json_int(fd,&k,"count",vraw); json_num(fd,&k,"avg_dist",safe_div(c->avg_VRAW_deps, vraw)); }
-		  json_obj_close(fd);
-		  json_obj_open(fd,&h,"waw");
-			{ int k = 1; json_int(fd,&k,"count",vwaw); json_num(fd,&k,"avg_dist",safe_div(c->avg_VWAW_deps, vwaw)); }
-		  json_obj_close(fd);
-		  json_obj_open(fd,&h,"war");
-			{ int k = 1; json_int(fd,&k,"count",vwar); json_num(fd,&k,"avg_dist",safe_div(c->avg_VWAR_deps, vwar)); }
-		  json_obj_close(fd); }
+		  json_int(fd, &h, "total", vraw + vwar + vwaw);
+		  print_dep_vector_json(fd, &h, "raw", vraw, c->avg_VRAW_deps, c->VRAW_deps);
+		  print_dep_vector_json(fd, &h, "waw", vwaw, c->avg_VWAW_deps, c->VWAW_deps);
+		  print_dep_vector_json(fd, &h, "war", vwar, c->avg_VWAR_deps, c->VWAR_deps);
+		  print_raw_matrix_pc_json(fd, &h, (const double (*)[8])c->RAW_MATRIX_PC);
+		  print_parallelism_available_json(fd, &h, c);
+		}
 	json_obj_close(fd);
 	json_obj_close(fd);
 

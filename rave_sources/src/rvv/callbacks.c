@@ -122,46 +122,106 @@ static inline uint16_t get_cons_idx(uint16_t type) {
     return INVALID_RAW_IDX;
 }
 
+static int rvv_mis_search(uint16_t mask, const uint16_t *conflict) {
+    if (mask == 0) return 0;
+    int v = __builtin_ctz(mask);
+    int without_v = rvv_mis_search(mask & ~(1U << v), conflict);
+    int with_v = 1 + rvv_mis_search(mask & ~conflict[v] & ~(1U << v), conflict);
+    return (with_v > without_v) ? with_v : without_v;
+}
+
+static void track_vector_parallelism_available(thread_state_t *state, short dst_d, short src1_d, short src2_d, short src3_d) {
+    int cur = state->rvv_raw_win_idx;
+    state->rvv_raw_win[cur].dst_d  = dst_d;
+    state->rvv_raw_win[cur].src1_d = src1_d;
+    state->rvv_raw_win[cur].src2_d = src2_d;
+    state->rvv_raw_win[cur].src3_d = src3_d;
+    state->rvv_raw_win_idx = (cur + 1) % 16;
+    if (state->rvv_raw_win_len < 16) {
+        state->rvv_raw_win_len++;
+    }
+
+    static const int win_sizes[4] = {2, 4, 8, 16};
+    for (int w_idx = 0; w_idx < 4; w_idx++) {
+        int W = win_sizes[w_idx];
+        if (state->rvv_raw_win_len < W) continue;
+
+        uint16_t dep[16] = {0};
+        for (int i = 0; i < W; i++) {
+            int slot_i = (cur - (W - 1 - i) + 32) % 16;
+            short d = state->rvv_raw_win[slot_i].dst_d;
+            if (valid_reg_id(d) && d >= RAVE_INI_REG_V) {
+                for (int j = i + 1; j < W; j++) {
+                    int slot_j = (cur - (W - 1 - j) + 32) % 16;
+                    short s1 = state->rvv_raw_win[slot_j].src1_d;
+                    short s2 = state->rvv_raw_win[slot_j].src2_d;
+                    short s3 = state->rvv_raw_win[slot_j].src3_d;
+                    if (s1 == d || s2 == d || s3 == d) {
+                        dep[i] |= (1U << j);
+                    }
+                }
+            }
+        }
+
+        // Transitive closure (Warshall)
+        for (int k = 0; k < W; k++) {
+            for (int i = 0; i < W; i++) {
+                if (dep[i] & (1U << k)) {
+                    dep[i] |= dep[k];
+                }
+            }
+        }
+
+        // Undirected conflict mask
+        uint16_t conflict[16] = {0};
+        for (int i = 0; i < W; i++) {
+            conflict[i] = dep[i];
+            for (int j = 0; j < W; j++) {
+                if (dep[j] & (1U << i)) {
+                    conflict[i] |= (1U << j);
+                }
+            }
+        }
+
+        uint16_t all_mask = (W == 16) ? 0xFFFF : ((1U << W) - 1);
+        int mis = rvv_mis_search(all_mask, conflict);
+
+        state->accum_counters.par_avail_sum[w_idx] += (double)mis;
+        state->accum_counters.par_avail_count[w_idx] += 1.0;
+    }
+}
+
 static int is_vector_reg(int reg){
 	return reg >= RAVE_INI_REG_V && reg < RAVE_INI_REG_V + NUM_VECTOR_REGS;
 }
 
-static int movement_category_for(const instr_data * instr, int whole_register_mem){
-	if (whole_register_mem) return RAVE_MOVEMENT_WHOLE_REGISTER;
-	if (instr->vinstr_idx >= 0){
-		short cat = rave_vinstr_category_of(instr->vinstr_idx);
-		while (cat >= 0){
-			const char * name = rave_vinstr_categories[cat].name;
-			if (!strcmp(name, "slide")) return RAVE_MOVEMENT_SLIDES;
-			if (!strcmp(name, "register_gather")) return RAVE_MOVEMENT_GATHERS;
-			if (!strcmp(name, "compress")) return RAVE_MOVEMENT_COMPRESS;
-			if (!strcmp(name, "vector_reduction")) return RAVE_MOVEMENT_REDUCTIONS;
-			if (!strcmp(name, "whole_register") ||
-			    !strcmp(name, "whole_register_move")) return RAVE_MOVEMENT_WHOLE_REGISTER;
-			if (!strcmp(name, "vector_mask")) return RAVE_MOVEMENT_MASK_OPS_SCANS;
-			if (!strcmp(name, "integer_extension") ||
-			    !strcmp(name, "single_width_type_convert") ||
-			    !strcmp(name, "widening_type_convert") ||
-			    !strcmp(name, "narrowing_type_convert")) return RAVE_MOVEMENT_LAYOUT_CONVERSIONS;
-			cat = rave_vinstr_categories[cat].parent;
-		}
-	}
-	if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_SLIDE))
+static int movement_category_for(const instr_data * instr){
+    if (is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_WHOLE_REGISTER)){
+        return RAVE_MOVEMENT_WHOLE_REGISTER;
+    }
+	if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_SLIDE)){
 		return RAVE_MOVEMENT_SLIDES;
-	if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_GATHER))
+	}
+	if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_GATHER)){
 		return RAVE_MOVEMENT_GATHERS;
-	if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_COMPRESS))
+	}
+	if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_COMPRESS)){
 		return RAVE_MOVEMENT_COMPRESS;
+	}
 	if (is_subtype(instr->type, T_REDUCTION) ||
-	    is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_REDUCTION))
+	    is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_REDUCTION)){
 		return RAVE_MOVEMENT_REDUCTIONS;
-	if (is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_WHOLE_REGISTER))
+	}
+	if (is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_WHOLE_REGISTER)){
 		return RAVE_MOVEMENT_WHOLE_REGISTER;
-	if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_MASK))
+	}
+	if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_MASK)){
 		return RAVE_MOVEMENT_MASK_OPS_SCANS;
+	}
 	if (is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_ARITH_WIDENING) ||
-	    is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_ARITH_NARROWING))
+	    is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_ARITH_NARROWING)){
 		return RAVE_MOVEMENT_LAYOUT_CONVERSIONS;
+    }
 	return -1;
 }
 
@@ -441,7 +501,6 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 	//double lmul_value;
 	uint64_t addr = 0;
 	int stride = 0;
-	int is_whole_register_mem = 0;
 
 	int8_t * indexes_8 = NULL;
 	int16_t * indexes_16 = NULL;
@@ -544,6 +603,8 @@ void insn_exec(thread_state_t * state, instr_data * instr){
         if(valid_reg_id(instr->src1_d)) state->read_reg_deps[instr->src1_d] = instr_c;
         if(valid_reg_id(instr->src2_d)) state->read_reg_deps[instr->src2_d] = instr_c;
         if(valid_reg_id(instr->src3_d)) state->read_reg_deps[instr->src3_d] = instr_c;
+
+        track_vector_parallelism_available(state, instr->dst_d, instr->src1_d, instr->src2_d, instr->src3_d);
     }
 
 	if (is_type(instr->type, T_VECTOR)){ //VECTOR
@@ -622,8 +683,6 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 
 #ifndef RVV_07
 			if ((((instr->instr32>>20)&0xFF) == 0x28)){
-				//Whole register load/stre
-					is_whole_register_mem = 1;
 				sew = 0; //sew: 1 byte (8 bits)
 				vl = RAVE_VLMAX / 8; //vl
 			}
@@ -808,6 +867,17 @@ void insn_exec(thread_state_t * state, instr_data * instr){
             state->accum_counters.VLMAX_accumulated += RAVE_VLMAX*real_lmul/real_sew_bits; // Acumulación de VLMAX para avg
             state->accum_counters.lmul_accumulated += real_lmul;
 
+            int mcat = movement_category_for(instr);
+            if (mcat >= 0) {
+                int nreads = 0, nwrites = 0;
+                // Calcular el número de bytes que se leen y escriben en la memoria de registros vectoriales
+                double bytes = (double)(RAVE_VLMAX * real_lmul) / 8.0;
+                count_vector_operands(instr, &nreads, &nwrites);
+                state->accum_counters.movement_instr[mcat][sew] += 1.0;
+                state->accum_counters.movement_vrf_read[mcat][sew] += bytes * nreads;
+                state->accum_counters.movement_vrf_write[mcat][sew] += bytes * nwrites;
+            }
+
             if(effective_vl < real_lmul*RAVE_VLMAX) {
                 if(ta)
                     state->accum_counters.ta_count++;
@@ -857,6 +927,7 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 
                 if(is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_ARITH_WIDENING)){
                     ++state->accum_counters.vwidening_instr[sew];
+                    fprintf(stdout, "Widening instruction detected: %s\n", instr->asm_string);
                     if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_COMP_FUSED)){
                         ++state->accum_counters.vwfused_instr[sew];
                     } else if(is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_REDUCTION)){
@@ -1030,17 +1101,6 @@ void insn_exec(thread_state_t * state, instr_data * instr){
                 state->accum_counters.velem_mem_stride[sew] += vl;
             else if (is_subsubtype(instr->type, T_INDEX))
                 state->accum_counters.velem_mem_indexed[sew] += vl;
-        }
-        {
-            int mcat = movement_category_for(instr, is_whole_register_mem);
-            if (mcat >= 0) {
-                int nreads = 0, nwrites = 0;
-                double bytes = (double)vl * (double)(1ULL << sew);
-                count_vector_operands(instr, &nreads, &nwrites);
-                state->accum_counters.movement_instr[mcat][sew] += 1.0;
-                state->accum_counters.movement_vrf_read[mcat][sew] += bytes * nreads;
-                state->accum_counters.movement_vrf_write[mcat][sew] += bytes * nwrites;
-            }
         }
 	}else if (is_type(instr->type, T_VSETVL)){ 
 		loop_profile->loop_weight += 1;
