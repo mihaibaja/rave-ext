@@ -138,6 +138,10 @@ struct rave_counters{
                  * Consumidores: store, int arith, fp arith, fused, perm, reduction, mask, vector_to_scalar
                  */
                 double RAW_MATRIX_PC[8][8]; 
+                /**
+                 * Productores & consumidores:  load, store, int arith, fp arith, fused, perm, reduction, mask, scalar_to_vector, vector_to_scalar
+                 */
+                double JUST_BEFORE_MATRIX[10][10];
 
                 /* Paralelismo disponible: ventanas W = 2, 4, 8, 16 */
                 double par_avail_sum[4];

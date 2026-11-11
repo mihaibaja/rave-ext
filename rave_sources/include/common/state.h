@@ -116,6 +116,8 @@ struct thread_state_t{
     int rvv_raw_win_idx;
     int rvv_raw_win_len;
 
+    int prev_vec_type_ext;
+
     uint64_t inst_trace_last_write[96];
     uint64_t inst_trace_last_read[96];
 

@@ -149,10 +149,12 @@ void reset_thread(int cpu_index){
 	memset(state->rvv_raw_win, 0, sizeof(state->rvv_raw_win));
 	state->rvv_raw_win_idx = 0;
 	state->rvv_raw_win_len = 0;
+	state->prev_vec_type_ext = -1;
     memset(state->accum_counters.VRAW_deps, 0, sizeof(state->accum_counters.VRAW_deps));
     memset(state->accum_counters.VWAR_deps, 0, sizeof(state->accum_counters.VWAR_deps));
     memset(state->accum_counters.VWAW_deps, 0, sizeof(state->accum_counters.VWAW_deps));
     memset(state->accum_counters.RAW_MATRIX_PC, 0, sizeof(state->accum_counters.RAW_MATRIX_PC));
+    memset(state->accum_counters.JUST_BEFORE_MATRIX, 0, sizeof(state->accum_counters.JUST_BEFORE_MATRIX));
 	
 	//Musa:
 	state -> prev_dst = 0;

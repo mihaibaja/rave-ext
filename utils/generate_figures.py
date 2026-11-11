@@ -608,6 +608,132 @@ def plot_fig_3_6(region_name, benchmark_name, vec_deps, region_dir):
     return True
 
 
+OVERLAP_KEYS = [
+    "load", "store", "int_arith", "fp_arith", "fused",
+    "permutation", "reduction", "mask", "scalar_to_vector", "vector_to_scalar"
+]
+OVERLAP_LABELS = {
+    "load": "Load",
+    "store": "Store",
+    "int_arith": "Int Arith",
+    "fp_arith": "FP Arith",
+    "fused": "FMA / Fused",
+    "permutation": "Permutation",
+    "reduction": "Reduction",
+    "mask": "Mask",
+    "scalar_to_vector": "Scalar->Vec",
+    "vector_to_scalar": "Vec->Scalar",
+}
+
+
+def plot_fig_3_7(region_name, benchmark_name, vec_deps, region_dir, counters=None, deps=None):
+    """Figura 3.7: Matriz de Overlap / Instrucción Justo Anterior (I_{t-1} -> I_t) 10x10."""
+    search_dicts = [d for d in [vec_deps, deps, counters] if isinstance(d, dict)]
+    candidate_keys = ["instruction_overlap", "just_before_matrix", "just_before_matrix_pc", "overlap_matrix"]
+    found_obj = None
+    for d in search_dicts:
+        for k in candidate_keys:
+            if k in d and isinstance(d[k], dict):
+                found_obj = d[k]
+                break
+        if found_obj is not None:
+            break
+
+    if not found_obj:
+        return False
+
+    for subkey in ["raw_counts", "matrixCPCounts", "counts"]:
+        if subkey in found_obj and isinstance(found_obj[subkey], dict):
+            found_obj = found_obj[subkey]
+            break
+
+    def norm(s):
+        return str(s).lower().replace(" ", "_").replace("-", "_")
+
+    found_keys_norm = {norm(k): k for k in found_obj.keys()}
+    overlap_keys_norm = [norm(k) for k in OVERLAP_KEYS]
+    if not any(pk in found_keys_norm for pk in overlap_keys_norm):
+        return False
+
+    matrix = np.zeros((len(OVERLAP_KEYS), len(OVERLAP_KEYS)), dtype=float)
+    for i, prod in enumerate(OVERLAP_KEYS):
+        prod_norm = norm(prod)
+        actual_prod_key = found_keys_norm.get(prod_norm)
+        if not actual_prod_key:
+            continue
+        row_dict = found_obj.get(actual_prod_key, {})
+        if not isinstance(row_dict, dict):
+            continue
+        row_keys_norm = {norm(k): k for k in row_dict.keys()}
+        for j, cons in enumerate(OVERLAP_KEYS):
+            cons_norm = norm(cons)
+            actual_cons_key = row_keys_norm.get(cons_norm)
+            if actual_cons_key:
+                try:
+                    matrix[i, j] = float(row_dict.get(actual_cons_key, 0))
+                except (ValueError, TypeError):
+                    matrix[i, j] = 0.0
+
+    total_trans = np.sum(matrix)
+    if total_trans > 0:
+        matrix_global_pct = (matrix / total_trans) * 100.0
+    else:
+        matrix_global_pct = np.zeros_like(matrix)
+
+    row_sums = matrix.sum(axis=1, keepdims=True)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        matrix_row_pct = np.where(row_sums > 0, (matrix / row_sums) * 100.0, 0.0)
+
+    overlap_labels_list = [OVERLAP_LABELS[k] for k in OVERLAP_KEYS]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 9))
+    fig.suptitle(f"Figura 3.7 — Matriz de Overlap: Instrucción Justo Anterior ($I_{{t-1}} \\to I_t$) (Total pares: {int(total_trans):,})\nBenchmark: {benchmark_name} | Región: {region_name}", fontsize=14, fontweight="bold")
+
+    max_g = max(float(np.max(matrix_global_pct)), 1.0)
+    im1 = ax1.imshow(matrix_global_pct, cmap="Purples", vmin=0, vmax=max_g)
+    ax1.set_title("Versión A: % respecto al total de pares consecutivos ($I_{t-1} \\to I_t$)", fontsize=11, fontweight="bold")
+    ax1.set_xticks(range(len(OVERLAP_KEYS)))
+    ax1.set_xticklabels(overlap_labels_list, rotation=45, ha="right", fontsize=9)
+    ax1.set_yticks(range(len(OVERLAP_KEYS)))
+    ax1.set_yticklabels(overlap_labels_list, fontsize=9)
+    ax1.set_xlabel("Instrucción Actual $I_t$", fontsize=10, fontweight="bold")
+    ax1.set_ylabel("Instrucción Anterior $I_{t-1}$", fontsize=10, fontweight="bold")
+
+    for i in range(len(OVERLAP_KEYS)):
+        for j in range(len(OVERLAP_KEYS)):
+            val = matrix_global_pct[i, j]
+            cnt = int(matrix[i, j])
+            color = "white" if val > (np.max(matrix_global_pct) * 0.6) and val > 0 else "black"
+            text = f"{val:.1f}%\n({cnt:,})" if cnt > 0 else "0"
+            ax1.text(j, i, text, ha="center", va="center", color=color, fontsize=7.0)
+    fig.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04, label="% del total de transiciones")
+
+    im2 = ax2.imshow(matrix_row_pct, cmap="YlOrRd", vmin=0, vmax=100)
+    ax2.set_title("Versión B: % normalizado por fila (qué instrucción sigue a cada $I_{t-1}$)", fontsize=11, fontweight="bold")
+    ax2.set_xticks(range(len(OVERLAP_KEYS)))
+    ax2.set_xticklabels(overlap_labels_list, rotation=45, ha="right", fontsize=9)
+    ax2.set_yticks(range(len(OVERLAP_KEYS)))
+    ax2.set_yticklabels(overlap_labels_list, fontsize=9)
+    ax2.set_xlabel("Instrucción Actual $I_t$", fontsize=10, fontweight="bold")
+    ax2.set_ylabel("Instrucción Anterior $I_{t-1}$", fontsize=10, fontweight="bold")
+
+    for i in range(len(OVERLAP_KEYS)):
+        for j in range(len(OVERLAP_KEYS)):
+            val = matrix_row_pct[i, j]
+            cnt = int(matrix[i, j])
+            color = "white" if val > 60 else "black"
+            text = f"{val:.1f}%" if cnt > 0 else "0%"
+            ax2.text(j, i, text, ha="center", va="center", color=color, fontsize=7.5)
+    fig.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04, label="% de la fila")
+
+    plt.tight_layout()
+    out_file = os.path.join(region_dir, "fig3_7_matriz_overlap_instruccion_anterior.png")
+    plt.savefig(out_file, dpi=300)
+    plt.close(fig)
+    print(f"    [+] Generada: {out_file}")
+    return True
+
+
 # ==============================================================================
 # FIGURAS DEL CAPÍTULO 4
 # ==============================================================================
@@ -939,6 +1065,10 @@ def process_json_file(file_path, base_out_dir, allowed_regions="GLOBAL_REGION"):
             gen_3_6 = plot_fig_3_6(region_name, benchmark_name, vec_deps, region_dir)
             if not gen_3_6:
                 print("    [o] Figura 3.6 no generada: no hay percentiles ni histograma para calcular P50/P90/P99.")
+
+            gen_3_7 = plot_fig_3_7(region_name, benchmark_name, vec_deps, region_dir, counters=counters, deps=deps)
+            if not gen_3_7:
+                print("    [o] Figura 3.7 omitida: 'instruction_overlap' no está presente en este JSON.")
 
         # --- Figuras Capítulo 4 (Interfaz, Movimiento, Políticas y Máscaras) ---
         gen_4_1 = plot_fig_4_1(region_name, benchmark_name, counters, region_dir)

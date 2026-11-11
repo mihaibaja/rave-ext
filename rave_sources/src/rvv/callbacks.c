@@ -77,6 +77,61 @@ static inline uint16_t get_prod_idx(uint16_t type) {
 
     return INVALID_RAW_IDX;
 }
+
+/**
+ * Clasificación de instrucciones vectoriales para overlap (10 categorías simétricas):
+ * 0: Load
+ * 1: Store
+ * 2: Integer arithmetic
+ * 3: Floating-point arithmetic
+ * 4: Fused operations
+ * 5: Permutations
+ * 6: Reductions
+ * 7: Mask operations
+ * 8: Scalar to Vector
+ * 9: Vector to Scalar
+ */
+static inline uint16_t get_overlap_class_idx(uint16_t type) {
+    // 0. Load
+    if (is_type_ext(type, MASK_EXT_BASE, TYPE_EXT_LOAD)) return 0;
+
+    // 1. Store
+    if (is_type_ext(type, MASK_EXT_BASE, TYPE_EXT_STORE)) return 1;
+
+    // 8. Scalar to Vector (la instrucción lee un escalar y escribe en vector)
+    if (is_type_ext(type, MASK_EXT_OPERAND, TYPE_EXT_READ_SCALAR) 
+        && is_type_ext(type, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_MOVE)) return 8;
+
+    // 9. Vector to Scalar (la instrucción vectorial extrae a escalar)
+    if (is_type_ext(type, MASK_EXT_OPERAND, TYPE_EXT_WRITE_SCALAR)
+        && is_type_ext(type, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_MOVE)) return 9;
+
+    // Si es instrucción aritmética
+    if (is_type_ext(type, MASK_EXT_BASE, TYPE_EXT_ARITH)) {
+        uint16_t op = type & MASK_EXT_SUBSUBTYPE;
+
+        // 5. Permutaciones (move v-v, slide, compress, gather)
+        if (op == TYPE_EXT_ARITH_MOVE   || op == TYPE_EXT_ARITH_SLIDE ||
+            op == TYPE_EXT_ARITH_COMPRESS || op == TYPE_EXT_ARITH_GATHER) return 5;
+
+        // 6. Reducciones
+        if (op == TYPE_EXT_ARITH_REDUCTION) return 6;
+
+        // 7. Operaciones de Máscara
+        if (op == TYPE_EXT_ARITH_MASK) return 7;
+
+        // 4. Fused
+        if (op == TYPE_EXT_ARITH_COMP_FUSED) return 4;
+
+        // 2 y 3. Aritmética estándar
+        if (op == TYPE_EXT_ARITH_COMPUTATION) {
+            if (is_type_ext(type, TYPE_EXT_FP, TYPE_EXT_FP)) return 3; // fp arith
+            return 2; // int arith
+        }
+    }
+
+    return INVALID_RAW_IDX;
+}
 /**
  * 0: Store
  * 1: Integer arithmetic
@@ -513,6 +568,16 @@ void insn_exec(thread_state_t * state, instr_data * instr){
         instr_c.pos   = ++state->accum_counters.v_pos;
         instr_c.g_pos = ++state->accum_counters.g_pos;
         instr_c.type = instr->type_ext;
+
+        // To keep track of the Just-Before-Matrix instructions (10x10)
+        if (state->prev_vec_type_ext != -1) {
+            uint16_t prev_cat = get_overlap_class_idx((uint16_t)state->prev_vec_type_ext);
+            uint16_t curr_cat = get_overlap_class_idx(instr->type_ext);
+            if (prev_cat != INVALID_RAW_IDX && curr_cat != INVALID_RAW_IDX) {
+                state->accum_counters.JUST_BEFORE_MATRIX[prev_cat][curr_cat]++;
+            }
+        }
+        state->prev_vec_type_ext = (int)instr->type_ext;
         if (valid_reg_id(instr->dst_d)) {
             // CASO A: Destino Vectorial (Vector -> Vector)
             if (instr->dst_d >= RAVE_INI_REG_V) {

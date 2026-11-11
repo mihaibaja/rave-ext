@@ -547,6 +547,24 @@ static inline void print_raw_matrix_pc_json(FILE * fd, int * first, const double
 	print_matrix_cp_json(fd, first, "class_pairs", matrix);
 }
 
+static void print_overlap_matrix_json(FILE * fd, int * first, const char * key_name, const double matrix[10][10]){
+	static const char * const classes[10] = {
+		"load", "store", "int_arith", "fp_arith", "fused",
+		"permutation", "reduction", "mask", "scalar_to_vector", "vector_to_scalar"
+	};
+	int row_first = 1;
+	json_obj_open(fd, first, key_name);
+	for (int p = 0; p < 10; ++p){
+		int col_first = 1;
+		json_obj_open(fd, &row_first, classes[p]);
+		for (int c = 0; c < 10; ++c){
+			json_int(fd, &col_first, classes[c], matrix[p][c]);
+		}
+		json_obj_close(fd);
+	}
+	json_obj_close(fd);
+}
+
 static void print_parallelism_available_json(FILE * fd, int * first, const rave_counters * c) {
 	static const int win_sizes[4] = {2, 4, 8, 16};
 	int f_par = 1;
@@ -623,6 +641,7 @@ void print_counters_json(FILE * fd, rave_counters * c){
 		  print_dep_vector_json(fd, &h, "waw", vwaw, c->avg_VWAW_deps, c->VWAW_deps);
 		  print_dep_vector_json(fd, &h, "war", vwar, c->avg_VWAR_deps, c->VWAR_deps);
 		  print_raw_matrix_pc_json(fd, &h, (const double (*)[8])c->RAW_MATRIX_PC);
+		  print_overlap_matrix_json(fd, &h, "instruction_overlap", (const double (*)[10])c->JUST_BEFORE_MATRIX);
 		  print_parallelism_available_json(fd, &h, c);
 		}
 	json_obj_close(fd);
