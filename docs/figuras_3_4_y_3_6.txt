@@ -1,0 +1,22 @@
+Figura 3.4 — Dependencias concurrentes por ventana de instrucciones (Curva de oportunidad)
+Para caracterizar la congestión simultánea de riesgos y la oportunidad de mecanismos de desacoplo en vuelo se propone:
+Eje X: tamaño de ventana de instrucciones vectoriales simultáneamente en vuelo: 2, 4, 8, 16, 32 y 64 (escala logarítmica base 2).
+Eje Y: número medio de dependencias activas solapadas por ventana (o porcentaje acumulado de dependencias capturadas dentro de la ventana).
+Tres curvas por benchmark o región caliente:
+- Curva RAW: oportunidad y congestión sobre mecanismos de chaining y puertos de bypass/wakeup.
+- Curvas WAR y WAW: oportunidad y presión sobre el mecanismo de renombrado (renaming) para eliminar dependencias de nombre.
+Para el corpus agregado, mostrar línea mediana y banda intercuartil (percentiles 25 a 75) por tamaño de ventana.
+Esta figura cuantifica la densidad simultánea de dependencias que la microarquitectura debe gestionar al ampliar su ventana de issue. Permite distinguir si ampliar el buffer expone un cuello de botella de dependencias concurrentes o si la tasa de riesgos permanece controlada.
+
+--------------------------------------------------------------------------------
+
+Figura 3.6 — Dimensionamiento de buffers: Capacidad requerida para P50, P90 y P99
+Para evaluar el dimensionamiento óptimo de buffers y el trade-off frente a la cola larga (long-tail) se propone:
+Eje X: categorías de dependencia vectorial: RAW (chaining), WAR (renaming) y WAW (renaming).
+Eje Y: capacidad de buffer requerida (número de entradas / distancia cubierta).
+Tres barras adyacentes por tipo de riesgo:
+- Barra P50 (Mediana): capacidad de buffer requerida para cubrir el caso típico (50 % de las dependencias).
+- Barra P90: capacidad necesaria para absorber el 90 % de los riesgos en vuelo.
+- Barra P99: capacidad para el caso peor (99 %), revelando el impacto de dependencias anómalas o lejanas.
+Para el corpus agregado, representar boxplots con distribución de percentiles entre benchmarks o barras con rango de dispersión.
+Esta figura aplica la ley de rendimientos decrecientes al dimensionamiento de hardware. Permite justificar cuantitativamente la capacidad de colas y buffers de renombrado demostrando si duplicar el área de silicio apenas cubre una fracción marginal de dependencias lejanas.

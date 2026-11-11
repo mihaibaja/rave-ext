@@ -284,12 +284,24 @@ void rave_init(int argc, char **argv){
 	if (RAVE_INST_NAME != NULL) {
 		INST_TRACE_NAME = strdup(RAVE_INST_NAME);
 	}
+	char * env_trace_bb = getenv("TRACE_BB");
+	if (env_trace_bb == NULL) env_trace_bb = getenv("RAVE_TRACE_BB");
+	if (env_trace_bb != NULL && (atoi(env_trace_bb) == 1 || strcmp(env_trace_bb, "on") == 0)) {
+		TRACE_BB = 1;
+	}
+	char * env_bb_json = getenv("BB_JSON_NAME");
+	if (env_bb_json == NULL) env_bb_json = getenv("RAVE_BB_JSON_NAME");
+	if (env_bb_json != NULL) {
+		BB_JSON_NAME = strdup(env_bb_json);
+		TRACE_BB = 1;
+	}
 
 	expected_threads = alloc_threads;
 	cpus_state = (thread_state_t*)malloc(sizeof(thread_state_t)*alloc_threads);
 
 	for(int i=0; i<argc; ++i){
 		if (contains_string(argv[i], "TRACE_SCALAR")) TRACE_SCALAR = 1;
+		else if (contains_string(argv[i], "TRACE_BB")) TRACE_BB = 1;
 		else if (contains_string(argv[i], "TRACE_ADDR")) TRACE_ADDR = 1;
 		else if (contains_string(argv[i], "TRACE_INDEXES")) TRACE_INDEXES = 1;
 		else if (contains_string(argv[i], "TRACE_EXTENDED")) TRACE_EXTENDED = 1;
@@ -390,6 +402,14 @@ void rave_init(int argc, char **argv){
 				size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;
 				FD_JSON = fopen(&argv[i][j+1], "w");
 			}
+			else if (contains_string(argv[i], "BB_JSON_NAME")){
+				size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;
+				if (BB_JSON_NAME) free(BB_JSON_NAME);
+				int len = strlen(&argv[i][j+1]);
+				BB_JSON_NAME = malloc(len+1);
+				strcpy(BB_JSON_NAME, &argv[i][j+1]);
+				TRACE_BB = 1;
+			}
 			else if (contains_string(argv[i], "REGION_EVENT")){
 				size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;
 				int event = atoi(&argv[i][j+1]);
@@ -434,6 +454,16 @@ void rave_init(int argc, char **argv){
 		if (PRINT_REPORT && FD_REPORT==NULL) FD_REPORT = stdout; 
 		if (PRINT_PROFILE && FD_PROFILE==NULL) FD_PROFILE = stdout; 
 		if (PRINT_CALLTRACE && FD_CALLTRACE==NULL) FD_CALLTRACE = stdout; 
+
+		if (TRACE_BB && BB_JSON_NAME == NULL) {
+			if (BINARY_NAME != NULL) {
+				char default_bb_name[512];
+				snprintf(default_bb_name, sizeof(default_bb_name), "%s_bb.json", BINARY_NAME);
+				BB_JSON_NAME = strdup(default_bb_name);
+			} else {
+				BB_JSON_NAME = strdup("rave_bb.json");
+			}
+		} 
 
 
 		if (PRINT_PRV){

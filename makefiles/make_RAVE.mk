@@ -19,11 +19,12 @@ rave2prv.o \
 regions.o \
 threading.o \
 scalar_blocks.o \
-inst_trace.o
+inst_trace.o 
 
 QEMU_OBJ=\
 utils.o \
-tb_hook.o 
+tb_hook.o \
+bb_tracker.o
 
 CC=gcc
 CFLAGS=-O3 -Wall -Wno-unused-parameter -Werror -fPIC -g

@@ -265,7 +265,6 @@ uint16_t instr_set_vector_type_ext(uint32_t insn_opcode, char* instr_asm, uint16
             }
 
             /** REDUCTION INSTRUCTIONS */
-            fprintf(stdout, "Reduction instruction possible: %s; funct3: %d, funct6: %d\n", instr_asm, funct3, funct6);
             if (funct3 == 2 && ((funct6 >= 0 && funct6 <= 7) || funct6 == 0x30 || funct6 == 0x31)) {   
                 /**OPMVV: 010 
                  * others: vredsum, vredand, vredor, vredxor, vredminu, vredmin, vredmaxu, vredmax

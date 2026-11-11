@@ -32,6 +32,8 @@ extern int REGION_EVENT;
 extern char STREAM_REPORT;
 extern char TRACE_ADDR;
 extern char TRACE_SCALAR;
+extern char TRACE_BB;
+extern char * BB_JSON_NAME;
 extern char TRACE_EXTENDED;
 extern char INST_TRACE_ENABLED;
 extern char * INST_TRACE_NAME;

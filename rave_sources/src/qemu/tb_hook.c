@@ -20,6 +20,7 @@
 #endif
 #include "scalar_blocks.h"
 #include "init_exit.h"
+#include "bb_tracker.h"
 
 void rv_read_string(unsigned int cpu_index, uint32_t insn_opcode, char * str_ptr, int maxlen){
 	int src1 = (insn_opcode>>15)&0x1F;
@@ -130,14 +131,19 @@ static void scalar_register_ids(const char *insn_disas, int *dst, int *src1, int
 QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 void plugin_exit(qemu_plugin_id_t id, void *p)
 {
-	rave_exit();
+    if (TRACE_BB) {
+        bb_tracker_cleanup();
+    }
+    rave_exit();
 }
 QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
 		const qemu_info_t *info, int argc,
 		char **argv)
 {
-
 		rave_init(argc,argv);
+        if (TRACE_BB) {
+            bb_tracker_init(alloc_threads > 0 ? alloc_threads : 64);
+        }
 		qemu_plugin_register_vcpu_tb_trans_cb(id, vcpu_tb_trans);
 		qemu_plugin_register_atexit_cb(id, plugin_exit, NULL);
 
@@ -182,6 +188,12 @@ char is_rave_api(uint32_t insn_opcode, struct qemu_plugin_insn * insn){
 	return 1;
 }
 
+void
+vcpu_bb_analyze(unsigned int cpu_index, void *udata){
+    //struct prueba_data *data = (struct prueba_data *)udata;
+    bb_tracker_on_tb_exec(cpu_index, (tb_data_t*)udata);
+}
+
 void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 {
 #ifdef TIMEDEBUG
@@ -193,8 +205,9 @@ void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 	char *insn_disas;
 
 	size_t n = qemu_plugin_tb_n_insns(tb);
+    size_t vector_count = 0;
 
-	if (!PRINT_PRV && !PRINT_LOGFILE && !PRINT_REPORT && !PRINT_CSV && !PRINT_PROFILE && !PRINT_JSON && !INST_TRACE_ENABLED){
+	if (!PRINT_PRV && !PRINT_LOGFILE && !PRINT_REPORT && !PRINT_CSV && !PRINT_PROFILE && !PRINT_JSON && !INST_TRACE_ENABLED && !TRACE_BB){
 		return;
 	}
 
@@ -226,12 +239,14 @@ void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 		if (insn_disas[0] == 'v') is_vector=1;
 #endif		
 		if (is_vector){
+            vector_count++;
 			//Register scalar block
 			if (scalar_block_start != i){
 				qemu_plugin_register_vcpu_insn_exec_cb(qemu_plugin_tb_get_insn(tb,scalar_block_start), vcpu_scalar_block_exec, QEMU_PLUGIN_CB_NO_REGS, scalar_block_data);
 			}
 			//Register vector instruction
 			instr_data * insn_struct = fill_instr_struct(insn_vaddr, insn_disas, insn_opcode, PRINT_PRV);
+            fprintf(stdout, "Vector instruction: %s\n", insn_disas);
 			qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_insn_exec, QEMU_PLUGIN_CB_R_REGS, insn_struct);
 			//Prepare next scalar block
 			scalar_block_start = i+1;
@@ -266,6 +281,22 @@ void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 			rolling_scalar_block(insn_opcode, insn_vaddr, scalar_block_data);
 		}
 	}
+
+    if (TRACE_BB) {
+        tb_data_t *tb_data = (tb_data_t *)malloc(sizeof(tb_data_t));
+        insn = qemu_plugin_tb_get_insn(tb, 0);
+        tb_data->pc = qemu_plugin_insn_vaddr(insn);
+
+        insn = qemu_plugin_tb_get_insn(tb, n-1);
+        tb_data->end_pc = qemu_plugin_insn_vaddr(insn);
+        qemu_plugin_insn_data(insn, &insn_opcode, sizeof(insn_opcode));
+        tb_data->opcode = insn_opcode;
+        if(vector_count > 0) fprintf(stdout, "VECTOR: %ld\n", vector_count);
+        tb_data->vec_inst = vector_count;
+        tb_data->n = n;
+        qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_bb_analyze, QEMU_PLUGIN_CB_NO_REGS, tb_data);
+    } 
+
 	if (scalar_block_start != n){ //Unfinished scalar block
 		qemu_plugin_register_vcpu_insn_exec_cb(qemu_plugin_tb_get_insn(tb,scalar_block_start), vcpu_scalar_block_exec, QEMU_PLUGIN_CB_NO_REGS, scalar_block_data);
 	}

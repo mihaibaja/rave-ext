@@ -14,6 +14,8 @@ if [ $# -lt 1 ] || [[ "$1" == "--help" ]]; then
 	echo "Additionally, these environment variables control the tracing plugin:"
 echo "
  - **RAVE_TRACE_SCALAR**: If set to \"1\", adds tracing information for each scalar instruction (trace gets a lot bigger). Otherwise, scalar instructions are treated as bursts. (default: 0)
+ - **RAVE_TRACE_BB**: If set to \"1\", enables Basic Block (BB) profiling and tracking. (default: 0)
+ - **RAVE_BB_JSON_NAME**: Sets the filename for the Basic Block JSON output (default: <binary>_bb.json or rave_bb.json). Additionally, automatically sets RAVE_TRACE_BB to 1.
  - **RAVE_TRACE_ADDR**: If set to \"1\", adds tracing information of the base address of vector loads/stores. (default: 0)
  - **RAVE_TRACE_INDEXES**: If set to \"1\", adds tracing information of the offsets in vector indexed loads/stores. (default: 0)
  - **RAVE_TRACE_EXTENDED**: If set to \"1\", enables extended tracing information. (default: 0)
@@ -98,6 +100,14 @@ if [ "$RAVE_PRINT_ADDR" == "1" ]; then
 fi
 
 args=;
+if [ "$RAVE_TRACE_BB" == "1" ] || [ "$TRACE_BB" == "1" ] || [ "$RAVE_BB_JSON_NAME" != "" ] || [ "$BB_JSON_NAME" != "" ]; then
+	args=$args",TRACE_BB=on"
+	if [ "$RAVE_BB_JSON_NAME" != "" ]; then
+		args=$args",BB_JSON_NAME=$RAVE_BB_JSON_NAME"
+	elif [ "$BB_JSON_NAME" != "" ]; then
+		args=$args",BB_JSON_NAME=$BB_JSON_NAME"
+	fi
+fi
 if [ "$RAVE_TRACE_SCALAR" == "1" ]; then #OPT-in
 	args=$args",TRACE_SCALAR=on"
 fi
