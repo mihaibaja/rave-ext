@@ -759,9 +759,30 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 			vl = RAVE_VLMAX / 8; //vl
 #endif
 		}
-	}else if (is_type(instr->type, T_VSETVL)){ 
+	}else if (is_type(instr->type, T_VSETVL)){
+		/* Como en la rama T_VECTOR: leer vl y vtype POST-ejecucion. Sin esto,
+		 * la traza y los contadores por SEW ven vl=0 y la configuracion
+		 * anterior (los valores iniciales de vl/vtype/sew) en TODOS los vsetvl.
+		 * rvl = AVL pedido: registro rs1 (vsetvl/vsetvli) o inmediato uimm
+		 * (vsetivli). Con rs1=x0 el AVL es el vl actual (el vl se mantiene):
+		 * rvl queda a 0 y el vl mantenido es el campo vl post-ejecucion. */
+		vl = get_vl(state);
+		vtype = get_vtype(state);
+#ifdef RVV_07
+		sew = (vtype >> 2)&0x7;
+		lmul = vtype&0x3;
+#else
+		sew = (vtype >> 3)&0x7;
+		lmul = vtype&0x7;
+#endif
 		int src1 = (instr->instr32>>15)&0x1F;
-		rvl = get_xreg(state,src1);
+		if ((((instr->instr32>>25)&0x7F)==64) && (((instr->instr32>>12)&0x7)==7)){
+			rvl = get_xreg(state,src1); //vsetvl: rs1
+		}else if (((instr->instr32>>31)&0x1)==0){
+			rvl = get_xreg(state,src1); //vsetvli: rs1
+		}else{
+			rvl = src1; //vsetivli: uimm
+		}
 	}
 
 	//  Logfile  //

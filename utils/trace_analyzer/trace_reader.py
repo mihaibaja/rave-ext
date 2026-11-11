@@ -161,6 +161,9 @@ class InstructionRecord:
     # no los escribe; se aceptan como opcionales para no romper esas trazas.
     vstart: int = 0
     active_elements: int = 0
+    # Solo en vsetvl/vsetvli/vsetivli: AVL pedido (rs1, o uimm en vsetivli;
+    # 0 con rs1=x0, que mantiene el vl actual).
+    rvl: Optional[int] = None
     aux_records: List[AuxRecord] = field(default_factory=list)
 
     @classmethod
@@ -202,7 +205,7 @@ class InstructionRecord:
             raise TraceFormatError(f"sew must be int, got {type(data['sew']).__name__}")
         if not isinstance(data["masked"], bool):
             raise TraceFormatError(f"masked must be bool, got {type(data['masked']).__name__}")
-        for optional_int_field in ("vstart", "active_elements"):
+        for optional_int_field in ("vstart", "active_elements", "rvl"):
             if optional_int_field in data and not isinstance(data[optional_int_field], int):
                 raise TraceFormatError(
                     f"{optional_int_field} must be int, "
@@ -232,6 +235,7 @@ class InstructionRecord:
             deps=deps_list,
             vstart=data.get("vstart", 0),
             active_elements=data.get("active_elements", 0),
+            rvl=data.get("rvl"),
         )
 
     def is_vector(self) -> bool:

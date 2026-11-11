@@ -596,6 +596,7 @@ void inst_trace_emit_vsetvl(thread_state_t * state, instr_data * instr,
     fprintf(FD_INST_TRACE, ",\"decoded_op\":\"VSETVL\","
                            "\"dst\":[\"%s\"],"
                            "\"srcs\":[\"%s\"],"
+                           "\"rvl\":%" PRIu64 ","
                            "\"vl\":%" PRIu64 ","
                            "\"sew\":%d,"
                            "\"lmul\":\"%s\","
@@ -603,7 +604,7 @@ void inst_trace_emit_vsetvl(thread_state_t * state, instr_data * instr,
                            "\"vma\":%d,"
                            "\"masked\":false,"
                            "\"deps\":[",
-            dst_name, src_name, vl, sew_bits, get_lmul_string(lmul_code),
+            dst_name, src_name, rvl, vl, sew_bits, get_lmul_string(lmul_code),
             vta ? 1 : 0, vma ? 1 : 0);
 
     for (int i = 0; i < n_deps; ++i) {

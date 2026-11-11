@@ -36,10 +36,13 @@ Representa el flujo principal de ejecución. Cada línea describe una instrucci�
 
 ### Contexto Vectorial (Estado del VTYPE)
 * **`vl`**: *Vector Length* activo. El número real de elementos que procesa la instrucción en ese ciclo.
+* **`rvl`**: Solo presente en `vsetvl`/`vsetvli`/`vsetivli`: AVL (*Requested Vector Length*) pedido. Para `vsetvl` y `vsetvli` es el valor del registro `rs1` (0 si es `x0`, lo que significa "mantener el `vl` actual"); para `vsetivli` es el inmediato `uimm`.
 * **`sew`**: *Standard Element Width*. Ancho del elemento actual en bits (ej. 8, 16, 32).
 * **`lmul`**: *Length Multiplier*. Indica la agrupación de registros vectoriales (ej. `m1`, `m2`, `m4`).
 * **`vta` / `vma`**: Políticas para los elementos restantes y enmascarados: *Tail Agnostic* y *Mask Agnostic* (1 = *agnostic*, 0 = *undisturbed*).
 * **`masked`**: Booleano (`true`/`false`) que indica si la instrucción utiliza un registro máscara.
+
+> En los registros de `vsetvl`/`vsetvli`/`vsetivli`, `vl`, `sew`, `lmul`, `vta` y `vma` reflejan la configuración **posterior** a la ejecución (la que deja la instrucción). En particular, un `vsetvli x0, x0, …` emite `rvl: 0` y el `vl` mantenido de la configuración anterior.
 
 ### Dependencias y Hazards (`deps`)
 Lista de objetos que detallan los riesgos de datos (*data hazards*) detectados en tiempo de simulación:

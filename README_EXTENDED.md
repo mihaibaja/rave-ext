@@ -79,6 +79,7 @@ La traza es **completamente independiente** de una configuración concreta de la
   - Instrucción binaria original (`binary`), mnemónico (`op`), cadena ensambladora (`asm`) y operación decodificada (`decoded_op`);
   - Registros o grupos fuente (`srcs`) y destino (`dst`), teniendo en cuenta LMUL y operaciones widening/narrowing;
   - `vl`, `sew`, `lmul`, `vta`, `vma` y `vstart`;
+  - `rvl` en los registros `vsetvl/vsetvli/vsetivli`: AVL pedido (valor de `rs1`, o el inmediato `uimm` en `vsetivli`; 0 con `rs1=x0`, que mantiene el `vl` actual). En esos registros, `vl`, `sew`, `lmul`, `vta` y `vma` son los valores **posteriores** a la configuración;
   - Presencia de máscara (`masked`) y número de elementos activos (`active_elements`);
   - Dependencias por operando (`deps`), identificando tipo (`RAW`, `WAR`, `WAW`), número de secuencia del productor (`producer_seqno`) y distancia (`distance`).
 
