@@ -216,12 +216,16 @@
             "waw": { "$ref": "#/$defs/depVector" },
             "war": { "$ref": "#/$defs/depVector" },
             "class_pairs": {
-              "$ref": "#/$defs/rawProducerConsumerMatrix",
+              "$ref": "#/$defs/matrixCP",
               "description": "Matriz bidimensional productor-consumidor para dependencias RAW vectoriales."
             },
             "parallelism_available": {
                 "$ref": "#/$defs/parallelismAvailable",
                 "description": "Media de instrucciones por tamaño de ventana que no tienen RAW entre sí."
+            },
+            "instruction_overlap": {
+                "$ref": "#/$defs/matrixCP",
+                "description": "Matriz de pares de instrucciones vectoriales consecutivas (I_{t-1} -> I_t) para analisis de overlap."
             }
           }
         }
@@ -296,22 +300,9 @@
       }
     },
 
-    "rawProducerConsumerMatrix": {
+    "matrixCP": {
       "type": "object",
-      "description": "Distribución bidimensional de dependencias RAW según familia productora y consumidora.",
-      "required": ["raw_counts"],
-      "additionalProperties": false,
-      "properties": {
-        "raw_counts": {
-          "$ref": "#/$defs/rawMatrixCounts",
-          "description": "Matriz de ocurrencias absolutas de cada par productor-consumidor."
-        }
-      }
-    },
-
-    "rawMatrixCounts": {
-      "type": "object",
-      "description": "Filas: familias productoras de datos vectoriales.",
+      "description": "Distribución bidimensional según pares de clases funcionales (Class Pairs). Filas: familias de la primera instrucción o productora.",
       "required": [
         "load",
         "int_arith",
@@ -324,6 +315,7 @@
       ],
       "additionalProperties": false,
       "properties": {
+        "store": { "$ref": "#/$defs/consumerRowCounts" },
         "load": { "$ref": "#/$defs/consumerRowCounts" },
         "int_arith": { "$ref": "#/$defs/consumerRowCounts" },
         "fp_arith": { "$ref": "#/$defs/consumerRowCounts" },
@@ -331,7 +323,8 @@
         "permutation": { "$ref": "#/$defs/consumerRowCounts" },
         "reduction": { "$ref": "#/$defs/consumerRowCounts" },
         "mask": { "$ref": "#/$defs/consumerRowCounts" },
-        "scalar_to_vector": { "$ref": "#/$defs/consumerRowCounts" }
+        "scalar_to_vector": { "$ref": "#/$defs/consumerRowCounts" },
+        "vector_to_scalar": { "$ref": "#/$defs/consumerRowCounts" }
       }
     },
 
@@ -351,13 +344,15 @@
       "additionalProperties": false,
       "properties": {
         "store": { "type": "integer", "minimum": 0 },
+        "load": { "type": "integer", "minimum": 0 },
         "int_arith": { "type": "integer", "minimum": 0 },
         "fp_arith": { "type": "integer", "minimum": 0 },
         "fused": { "type": "integer", "minimum": 0 },
         "permutation": { "type": "integer", "minimum": 0 },
         "reduction": { "type": "integer", "minimum": 0 },
         "mask": { "type": "integer", "minimum": 0 },
-        "vector_to_scalar": { "type": "integer", "minimum": 0 }
+        "vector_to_scalar": { "type": "integer", "minimum": 0 },
+        "scalar_to_vector": { "type": "integer", "minimum": 0 }
       }
     },
 

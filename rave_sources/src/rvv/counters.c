@@ -521,7 +521,7 @@ static void print_dep_vector_json(FILE * fd, int * first, const char * name,
 	json_obj_close(fd);
 }
 
-static void print_raw_matrix_pc_json(FILE * fd, int * first, const double matrix[8][8]){
+static void print_matrix_cp_json(FILE * fd, int * first, const char * key_name, const double matrix[8][8]){
 	static const char * const prods[8] = {
 		"load", "int_arith", "fp_arith", "fused",
 		"permutation", "reduction", "mask", "scalar_to_vector"
@@ -530,20 +530,21 @@ static void print_raw_matrix_pc_json(FILE * fd, int * first, const double matrix
 		"store", "int_arith", "fp_arith", "fused",
 		"permutation", "reduction", "mask", "vector_to_scalar"
 	};
-	int h = 1;
-	json_obj_open(fd, first, "class_pairs");
-	json_obj_open(fd, &h, "raw_counts");
-	int raw_first = 1;
+	int row_first = 1;
+	json_obj_open(fd, first, key_name);
 	for (int p = 0; p < 8; ++p){
-		int row_first = 1;
-		json_obj_open(fd, &raw_first, prods[p]);
+		int col_first = 1;
+		json_obj_open(fd, &row_first, prods[p]);
 		for (int c = 0; c < 8; ++c){
-			json_int(fd, &row_first, cons[c], matrix[p][c]);
+			json_int(fd, &col_first, cons[c], matrix[p][c]);
 		}
 		json_obj_close(fd);
 	}
 	json_obj_close(fd);
-	json_obj_close(fd);
+}
+
+static inline void print_raw_matrix_pc_json(FILE * fd, int * first, const double matrix[8][8]){
+	print_matrix_cp_json(fd, first, "class_pairs", matrix);
 }
 
 static void print_parallelism_available_json(FILE * fd, int * first, const rave_counters * c) {

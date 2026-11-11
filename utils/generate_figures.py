@@ -321,22 +321,73 @@ def plot_fig_3_2(region_name, benchmark_name, vec_deps, region_dir):
     return True
 
 
-def plot_fig_3_3(region_name, benchmark_name, vec_deps, region_dir):
-    """Figura 3.3: Matriz productor-consumidor para dependencias RAW (Global y Normalizada por Fila)."""
-    class_pairs = vec_deps.get("class_pairs")
-    if not class_pairs or not isinstance(class_pairs, dict):
-        return False
-    
-    raw_counts = class_pairs.get("raw_counts")
-    if not raw_counts or not isinstance(raw_counts, dict):
-        return False
+def extract_matrix_cp(vec_deps, deps=None, counters=None):
+    """
+    Localiza y extrae de forma flexible la matriz de pares de clases (Class Pairs / Productor-Consumidor).
+    Soporta múltiples claves (class_pairs, matrix_cp, raw_producer_consumer_matrix, etc.)
+    y formatos (anidado en raw_counts o directo).
+    """
+    search_dicts = [d for d in [vec_deps, deps, counters] if isinstance(d, dict)]
+    candidate_keys = [
+        "class_pairs", "matrix_cp", "matrixCP",
+        "raw_producer_consumer_matrix", "rawProducerConsumerMatrix",
+        "raw_matrix", "raw_matrix_pc", "raw_counts"
+    ]
+
+    found_obj = None
+    for d in search_dicts:
+        for k in candidate_keys:
+            if k in d and isinstance(d[k], dict):
+                found_obj = d[k]
+                break
+        if found_obj is not None:
+            break
+
+    if not found_obj:
+        return None
+
+    # Si tiene un nivel anidado (ej. "raw_counts", "matrixCPCounts", "counts")
+    for subkey in ["raw_counts", "matrixCPCounts", "counts"]:
+        if subkey in found_obj and isinstance(found_obj[subkey], dict):
+            found_obj = found_obj[subkey]
+            break
+
+    def norm(s):
+        return str(s).lower().replace(" ", "_").replace("-", "_")
+
+    found_keys_norm = {norm(k): k for k in found_obj.keys()}
+    prod_keys_norm = [norm(k) for k in PROD_KEYS]
+
+    if not any(pk in found_keys_norm for pk in prod_keys_norm):
+        return None
 
     matrix = np.zeros((len(PROD_KEYS), len(CONS_KEYS)), dtype=float)
     for i, prod in enumerate(PROD_KEYS):
-        row = raw_counts.get(prod, {})
-        if isinstance(row, dict):
-            for j, cons in enumerate(CONS_KEYS):
-                matrix[i, j] = row.get(cons, 0)
+        prod_norm = norm(prod)
+        actual_prod_key = found_keys_norm.get(prod_norm)
+        if not actual_prod_key:
+            continue
+        row_dict = found_obj.get(actual_prod_key, {})
+        if not isinstance(row_dict, dict):
+            continue
+        row_keys_norm = {norm(k): k for k in row_dict.keys()}
+        for j, cons in enumerate(CONS_KEYS):
+            cons_norm = norm(cons)
+            actual_cons_key = row_keys_norm.get(cons_norm)
+            if actual_cons_key:
+                try:
+                    matrix[i, j] = float(row_dict.get(actual_cons_key, 0))
+                except (ValueError, TypeError):
+                    matrix[i, j] = 0.0
+
+    return matrix
+
+
+def plot_fig_3_3(region_name, benchmark_name, vec_deps, region_dir, counters=None, deps=None):
+    """Figura 3.3: Matriz productor-consumidor para dependencias RAW (Global y Normalizada por Fila)."""
+    matrix = extract_matrix_cp(vec_deps, deps=deps, counters=counters)
+    if matrix is None:
+        return False
 
     total_raw = np.sum(matrix)
     if total_raw > 0:
@@ -873,9 +924,9 @@ def process_json_file(file_path, base_out_dir, allowed_regions="GLOBAL_REGION"):
             if not gen_3_2:
                 print("    [o] Figura 3.2 no generada: no hay datos de CDF en los datos.")
 
-            gen_3_3 = plot_fig_3_3(region_name, benchmark_name, vec_deps, region_dir)
+            gen_3_3 = plot_fig_3_3(region_name, benchmark_name, vec_deps, region_dir, counters=counters, deps=deps)
             if not gen_3_3:
-                print("    [o] Figura 3.3 no generada: no hay matriz 'class_pairs' en los datos.")
+                print("    [o] Figura 3.3 no generada: no hay matriz de pares de clases (class_pairs) en los datos.")
 
             gen_3_4 = plot_fig_3_4(region_name, benchmark_name, vec_deps, num_instr, region_dir)
             if not gen_3_4:
