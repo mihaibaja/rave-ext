@@ -246,7 +246,6 @@ void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 			}
 			//Register vector instruction
 			instr_data * insn_struct = fill_instr_struct(insn_vaddr, insn_disas, insn_opcode, PRINT_PRV);
-            fprintf(stdout, "Vector instruction: %s\n", insn_disas);
 			qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_insn_exec, QEMU_PLUGIN_CB_R_REGS, insn_struct);
 			//Prepare next scalar block
 			scalar_block_start = i+1;
@@ -291,7 +290,6 @@ void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
         tb_data->end_pc = qemu_plugin_insn_vaddr(insn);
         qemu_plugin_insn_data(insn, &insn_opcode, sizeof(insn_opcode));
         tb_data->opcode = insn_opcode;
-        if(vector_count > 0) fprintf(stdout, "VECTOR: %ld\n", vector_count);
         tb_data->vec_inst = vector_count;
         tb_data->n = n;
         qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_bb_analyze, QEMU_PLUGIN_CB_NO_REGS, tb_data);

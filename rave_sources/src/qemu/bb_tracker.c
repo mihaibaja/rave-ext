@@ -8,6 +8,7 @@ typedef struct {
     uint64_t acc_vec_inst;
     uint64_t acc_insnt;
     uint64_t bb_last_pc;
+    uint32_t last_bb_id;
     bool in_bb;
 } vcpu_bb_state_t;
 
@@ -23,13 +24,20 @@ static size_t g_max_vcpus = 0;
 
 static GHashTable *g_bb_map = NULL;   /* clave: start_pc -> valor: bb_node_t* */                                                                                                        
 static GPtrArray  *g_bb_nodes = NULL;
+static GHashTable *g_bb_edges_map = NULL; /* clave: (src_id << 32) | dst_id -> valor: bb_edge_t* */
+static GPtrArray  *g_bb_edges = NULL;
 static GMutex      g_bb_lock;
 
 void bb_tracker_init(size_t max_vcpus) {
     g_max_vcpus = (max_vcpus > 0) ? max_vcpus : 64;
     g_vcpu_states = (vcpu_bb_state_t*)calloc(g_max_vcpus, sizeof(vcpu_bb_state_t));
+    for (size_t v = 0; v < g_max_vcpus; ++v) {
+        g_vcpu_states[v].last_bb_id = UINT32_MAX;
+    }
     g_bb_map = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, NULL);
     g_bb_nodes = g_ptr_array_new();
+    g_bb_edges_map = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, NULL);
+    g_bb_edges = g_ptr_array_new();
     g_mutex_init(&g_bb_lock);
 }
 
@@ -72,7 +80,7 @@ bb_terminator_t bb_tracker_classify_terminator(uint32_t op) {
 
 void bb_tracker_on_tb_exec(unsigned int vcpu_index, tb_data_t *tb_data) {
     if (vcpu_index >= g_max_vcpus) return;
-    // fprintf(stdout, "VCPU_INDEX: %u\n", vcpu_index);
+    
     vcpu_bb_state_t *st = &g_vcpu_states[vcpu_index];
     if(!st->in_bb) {
         st->acc_insnt = 0;
@@ -104,6 +112,25 @@ void bb_tracker_on_tb_exec(unsigned int vcpu_index, tb_data_t *tb_data) {
         } else {
             node->exec_count++;
         }
+
+        /* --- Registro de Aristas (last_bb_id -> current_node->id) --- */
+        if (st->last_bb_id != UINT32_MAX) {
+            uint64_t edge_key = ((uint64_t)st->last_bb_id << 32) | (uint64_t)node->id;
+            gpointer e_key = GSIZE_TO_POINTER(edge_key);
+            bb_edge_t *edge = (bb_edge_t *)g_hash_table_lookup(g_bb_edges_map, e_key);
+            if (edge == NULL) {
+                edge = (bb_edge_t *)malloc(sizeof(bb_edge_t));
+                edge->src_id = st->last_bb_id;
+                edge->dst_id = node->id;
+                edge->count = 1;
+                g_hash_table_insert(g_bb_edges_map, e_key, edge);
+                g_ptr_array_add(g_bb_edges, edge);
+            } else {
+                edge->count++;
+            }
+        }
+        st->last_bb_id = node->id;
+
         g_mutex_unlock(&g_bb_lock);
     }
 }
@@ -115,8 +142,6 @@ void bb_tracker_cleanup(void) {
     if (g_bb_nodes) {
         for(size_t i = 0; i < g_bb_nodes->len; ++i) {
             bb_node_t *node = (bb_node_t *)g_ptr_array_index(g_bb_nodes, i);
-            fprintf(stdout, "BB_ID: %u, START_PC: 0x%lx, END_PC: 0x%lx, NUM_INSNS: %lu, NUM_VEC_INSNS: %lu, EXEC_COUNT: %lu\n",
-                    node->id, node->start_pc, node->end_pc, node->num_insns, node->num_vec_insns, node->exec_count);
             free(node);
         }
         g_ptr_array_free(g_bb_nodes, true);
@@ -126,6 +151,20 @@ void bb_tracker_cleanup(void) {
         g_hash_table_destroy(g_bb_map);
         g_bb_map = NULL;
     }
+
+    if (g_bb_edges) {
+        for(size_t i = 0; i < g_bb_edges->len; ++i) {
+            bb_edge_t *edge = (bb_edge_t *)g_ptr_array_index(g_bb_edges, i);
+            free(edge);
+        }
+        g_ptr_array_free(g_bb_edges, true);
+        g_bb_edges = NULL;
+    }
+    if (g_bb_edges_map) {
+        g_hash_table_destroy(g_bb_edges_map);
+        g_bb_edges_map = NULL;
+    }
+
     g_mutex_clear(&g_bb_lock);
     if (g_vcpu_states) {
         free(g_vcpu_states);
@@ -140,11 +179,12 @@ void bb_tracker_dump_json(const char *filepath) {
     fprintf(f, "{\n");
     fprintf(f, "  \"generator\": \"RAVE\",\n");
     fprintf(f, "  \"summary\": {\n");
-    fprintf(f, "    \"total_unique_bbs\": %u\n", g_bb_nodes ? g_bb_nodes->len : 0);
+    fprintf(f, "    \"total_unique_bbs\": %u,\n", g_bb_nodes ? g_bb_nodes->len : 0);
+    fprintf(f, "    \"total_edges\": %u\n", g_bb_edges ? g_bb_edges->len : 0);
     fprintf(f, "  },\n");
     fprintf(f, "  \"nodes\": [\n");
 
-    for (guint i = 0; i < g_bb_nodes->len; ++i) {
+    for (guint i = 0; i < (g_bb_nodes ? g_bb_nodes->len : 0); ++i) {
         bb_node_t *n = (bb_node_t *)g_ptr_array_index(g_bb_nodes, i);
         uint64_t scalar = (n->num_insns >= n->num_vec_insns) ? (n->num_insns - n->num_vec_insns) : 0;
         double v_ratio = (n->num_insns > 0) ? ((double)n->num_vec_insns / n->num_insns) : 0.0;
@@ -165,6 +205,18 @@ void bb_tracker_dump_json(const char *filepath) {
         fprintf(f, "        \"execution_count\": %lu\n", n->exec_count);
         fprintf(f, "      }\n");
         fprintf(f, "    }%s\n", (i + 1 < g_bb_nodes->len) ? "," : "");
+    }
+
+    fprintf(f, "  ],\n");
+    fprintf(f, "  \"edges\": [\n");
+
+    for (guint i = 0; i < (g_bb_edges ? g_bb_edges->len : 0); ++i) {
+        bb_edge_t *e = (bb_edge_t *)g_ptr_array_index(g_bb_edges, i);
+        fprintf(f, "    {\n");
+        fprintf(f, "      \"src\": %u,\n", e->src_id);
+        fprintf(f, "      \"dst\": %u,\n", e->dst_id);
+        fprintf(f, "      \"count\": %lu\n", e->count);
+        fprintf(f, "    }%s\n", (i + 1 < g_bb_edges->len) ? "," : "");
     }
 
     fprintf(f, "  ]\n");

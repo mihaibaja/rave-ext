@@ -28,6 +28,12 @@ typedef struct {
     uint64_t exec_count;      /* Número de veces que se ha ejecutado */
 } bb_node_t;
 
+typedef struct {
+    uint32_t src_id;          /* ID del nodo origen */
+    uint32_t dst_id;          /* ID del nodo destino */
+    uint64_t count;           /* Frecuencia de esta transición */
+} bb_edge_t;
+
 /* Inicialización del tracker y reserva de estructuras */
 void bb_tracker_init(size_t max_vcpus);
 
