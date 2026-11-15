@@ -20,6 +20,7 @@ echo "
  - **RAVE_TRACE_INDEXES**: If set to \"1\", adds tracing information of the offsets in vector indexed loads/stores. (default: 0)
  - **RAVE_TRACE_EXTENDED**: If set to \"1\", enables extended tracing information. (default: 0)
  - **RAVE_INST_TRACE_ENABLED**: If set to \"1\", enables dynamic instruction-level tracing. (default: 0)
+ - **RAVE_INST_TRACE_BB_MODE**: If set to \"1\", enables basic block linked instruction tracing (ASM stored once per BB). (default: 0)
  - **RAVE_INST_TRACE_NAME**: Sets the filename for the instruction trace (default: rave_inst_trace.jsonl).
  - **RAVE_DEBUG_INFO**: If set to \"1\", enables debug information. (default: 0)
  - **RAVE_RAW_DIST**: Sets the RAW dependency distance threshold.
@@ -122,6 +123,9 @@ if [ "$RAVE_TRACE_EXTENDED" == "1" ]; then
 fi
 if [ "$RAVE_INST_TRACE_ENABLED" == "1" ]; then
 	args=$args",INST_TRACE_ENABLED=on"
+fi
+if [ "$RAVE_INST_TRACE_BB_MODE" == "1" ]; then
+	args=$args",INST_TRACE_BB_MODE=on"
 fi
 if [ "$RAVE_INST_TRACE_NAME" != "" ]; then
 	args=$args",INST_TRACE_NAME=$RAVE_INST_TRACE_NAME"

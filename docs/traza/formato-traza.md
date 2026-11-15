@@ -22,34 +22,22 @@ Suele aparecer únicamente en la primera línea del archivo. Define la configura
 ---
 
 ## 2. Registro de Instrucción (`"record_type": "inst"`)
-Representa el flujo principal de ejecución. Cada línea describe una instrucción ejecutada y el contexto exacto del *datapath* en ese momento. Es la base para cualquier script de análisis (como `opcode_classifier.py`).
+Representa el flujo principal de ejecución. Cada línea describe una instrucción ejecutada y sus registros involucrados.
 
 ### Campos Base
 * **`seqno`**: Número de secuencia único de la instrucción en la traza cronológica.
 * **`hart`**: ID del *hardware thread* que ejecuta la instrucción.
 * **`pc`**: *Program Counter*. La dirección de memoria de la instrucción en hexadecimal.
-* **`binary`**: Código máquina de la instrucción (los 32 bits codificados en hexadecimal).
 * **`op`**: Nemónico principal o código de operación base (ej. `vle32.v`, `addi`, `vsetvl`).
-* **`asm`**: Ensamblador completo decodificado, incluyendo registros y operandos (ej. `vle32.v v1,(a1)`).
-* **`decoded_op`**: Clasificación arquitectónica de la operación (ej. `SCALAR`, `VECTOR_LOAD_UNIT`, `VECTOR_ARITH_REDUCTION`).
+* **`decoded_op`**: Código numérico entero (`uint16_t`) correspondiente a la clasificación arquitectónica extendida (`type_ext`). Para instrucciones escalares toma valor `0`.
 * **`dst` / `srcs`**: Listas con los registros destino y fuente implicados. Pueden ser escalares (`x0` a `x31`), flotantes (`f0` a `f31`) o vectoriales (`v0` a `v31`).
 
-### Contexto Vectorial (Estado del VTYPE)
-* **`vl`**: *Vector Length* activo. El número real de elementos que procesa la instrucción en ese ciclo.
-* **`rvl`**: Solo presente en `vsetvl`/`vsetvli`/`vsetivli`: AVL (*Requested Vector Length*) pedido. Para `vsetvl` y `vsetvli` es el valor del registro `rs1` (0 si es `x0`, lo que significa "mantener el `vl` actual"); para `vsetivli` es el inmediato `uimm`.
-* **`sew`**: *Standard Element Width*. Ancho del elemento actual en bits (ej. 8, 16, 32).
-* **`lmul`**: *Length Multiplier*. Indica la agrupación de registros vectoriales (ej. `m1`, `m2`, `m4`).
-* **`vta` / `vma`**: Políticas para los elementos restantes y enmascarados: *Tail Agnostic* y *Mask Agnostic* (1 = *agnostic*, 0 = *undisturbed*).
-* **`masked`**: Booleano (`true`/`false`) que indica si la instrucción utiliza un registro máscara.
-
-> En los registros de `vsetvl`/`vsetvli`/`vsetivli`, `vl`, `sew`, `lmul`, `vta` y `vma` reflejan la configuración **posterior** a la ejecución (la que deja la instrucción). En particular, un `vsetvli x0, x0, …` emite `rvl: 0` y el `vl` mantenido de la configuración anterior.
-
-### Dependencias y Hazards (`deps`)
-Lista de objetos que detallan los riesgos de datos (*data hazards*) detectados en tiempo de simulación:
-* `operand`: El registro específico que causa la dependencia.
-* `dep_type`: El tipo de riesgo estructural (`RAW` - Read After Write, `WAW`, `WAR`).
-* `producer_seqno`: El número de secuencia (`seqno`) de la instrucción previa que generó el dato que estamos esperando.
-* `distance`: Distancia temporal (en número de instrucciones) hasta el productor. *Dato vital para justificar la necesidad de forwardings u optimizar el scheduler.*
+### Contexto Vectorial (Exclusivo en instrucciones `vsetvl` / `vsetvli`)
+Las instrucciones que configuran el hardware vectorial (`vsetvl`, `vsetvli`) incluyen adicionalmente los campos de configuración del estado vectorial (*VTYPE* / *VL*):
+* **`vl`**: *Vector Length* activo resultante.
+* **`sew`**: *Standard Element Width* en bits (ej. 8, 16, 32, 64).
+* **`lmul`**: *Length Multiplier* en formato texto (ej. `m1`, `m2`, `m4`, `mf2`).
+* **`vta` / `vma`**: Políticas para elementos restantes y enmascarados: *Tail Agnostic* y *Mask Agnostic* (1 = *agnostic*, 0 = *undisturbed*).
 
 ---
 

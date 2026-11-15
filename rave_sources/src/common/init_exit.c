@@ -280,6 +280,11 @@ void rave_init(int argc, char **argv){
 
 	char * RAVE_INST_TRACE = getenv("RAVE_INST_TRACE_ENABLED");
 	if (RAVE_INST_TRACE != NULL && atoi(RAVE_INST_TRACE) == 1) INST_TRACE_ENABLED = 1;
+	char * env_inst_trace_bb = getenv("INST_TRACE_BB_MODE");
+	if (env_inst_trace_bb == NULL) env_inst_trace_bb = getenv("RAVE_INST_TRACE_BB_MODE");
+	if (env_inst_trace_bb != NULL && (atoi(env_inst_trace_bb) == 1 || strcmp(env_inst_trace_bb, "on") == 0)) {
+		INST_TRACE_BB_MODE = 1;
+	}
 	char * RAVE_INST_NAME = getenv("RAVE_INST_TRACE_NAME");
 	if (RAVE_INST_NAME != NULL) {
 		INST_TRACE_NAME = strdup(RAVE_INST_NAME);
@@ -305,6 +310,7 @@ void rave_init(int argc, char **argv){
 		else if (contains_string(argv[i], "TRACE_ADDR")) TRACE_ADDR = 1;
 		else if (contains_string(argv[i], "TRACE_INDEXES")) TRACE_INDEXES = 1;
 		else if (contains_string(argv[i], "TRACE_EXTENDED")) TRACE_EXTENDED = 1;
+		else if (contains_string(argv[i], "INST_TRACE_BB_MODE")) INST_TRACE_BB_MODE = 1;
 		else if (contains_string(argv[i], "INST_TRACE_ENABLED")) INST_TRACE_ENABLED = 1;
 		else if (contains_string(argv[i], "INST_TRACE_NAME")){
 			size_t j; for(j=0; j<strlen(argv[i]); ++j) if (argv[i][j] == '=') break;

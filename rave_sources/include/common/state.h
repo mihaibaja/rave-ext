@@ -36,6 +36,7 @@ extern char TRACE_BB;
 extern char * BB_JSON_NAME;
 extern char TRACE_EXTENDED;
 extern char INST_TRACE_ENABLED;
+extern char INST_TRACE_BB_MODE;
 extern char * INST_TRACE_NAME;
 extern FILE * FD_INST_TRACE;
 extern char DEBUG_INFO;
@@ -103,8 +104,8 @@ struct thread_state_t{
 	int prev_dst;
 
     // To check dependencies
-    struct inst_compressed_t write_reg_deps[96];
-    struct inst_compressed_t read_reg_deps[96];
+    struct inst_compressed_t* write_reg_deps[96];
+    struct inst_compressed_t* read_reg_deps[96];
 
     // Circular buffer for windowed RAW dependency tracking (W <= 16)
     struct {
@@ -117,9 +118,6 @@ struct thread_state_t{
     int rvv_raw_win_len;
 
     int prev_vec_type_ext;
-
-    uint64_t inst_trace_last_write[96];
-    uint64_t inst_trace_last_read[96];
 
 	void * regs;
 };

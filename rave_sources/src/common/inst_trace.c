@@ -13,18 +13,10 @@
 #include <inttypes.h>
 #include <stdbool.h>
 
-#define MAX_TRACE_DEPS 16
 #define MAX_REGS_IN_GROUP 8
 #define MAX_HEX_STR_LEN 4096
 
 static uint64_t inst_trace_seqno = 0;
-
-typedef struct {
-    char operand[16];
-    char dep_type[8]; // "RAW", "WAR", "WAW"
-    uint64_t producer_seqno;
-    uint64_t distance;
-} inst_trace_dep_t;
 
 static inline bool valid_reg(int id) {
     return (id >= 0 && id < 96);
@@ -107,58 +99,6 @@ static int get_lmul_factor(uint64_t lmul) {
 #endif
 }
 
-static const char * decode_operation_name(instr_data * instr) {
-    if (is_type(instr->type, T_VSETVL)) {
-        return "VSETVL";
-    }
-    if (is_type(instr->type, T_VECTOR)) {
-        if (is_subtype(instr->type, T_LOAD)) {
-            if (is_subsubtype(instr->type, T_UNIT)) return "VECTOR_LOAD_UNIT";
-            if (is_subsubtype(instr->type, T_STRIDE)) return "VECTOR_LOAD_STRIDED";
-            if (is_subsubtype(instr->type, T_INDEX)) return "VECTOR_LOAD_INDEXED";
-            return "VECTOR_LOAD";
-        }
-        if (is_subtype(instr->type, T_STORE)) {
-            if (is_subsubtype(instr->type, T_UNIT)) return "VECTOR_STORE_UNIT";
-            if (is_subsubtype(instr->type, T_STRIDE)) return "VECTOR_STORE_STRIDED";
-            if (is_subsubtype(instr->type, T_INDEX)) return "VECTOR_STORE_INDEXED";
-            return "VECTOR_STORE";
-        }
-        if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_GATHER)) {
-            return "VECTOR_GATHER";
-        }
-        if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_SLIDE)) {
-            return "VECTOR_SLIDE";
-        }
-        if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_COMPRESS)) {
-            return "VECTOR_COMPRESS";
-        }
-        if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_MOVE)) {
-            return "VECTOR_MOVE";
-        }
-        if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_MASK)) {
-            return "VECTOR_MASK_OP";
-        }
-        if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_REDUCTION)) {
-            return "VECTOR_ARITH_REDUCTION";
-        }
-        if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_COMP_FUSED)) {
-            return "VECTOR_ARITH_FUSED";
-        }
-        if (is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_ARITH_WIDENING)) {
-            return "VECTOR_ARITH_WIDENING";
-        }
-        if (is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_ARITH_NARROWING)) {
-            return "VECTOR_ARITH_NARROWING";
-        }
-        if (is_subtype(instr->type, T_ARITH)) {
-            if (is_subsubtype(instr->type, T_FP)) return "VECTOR_ARITH_FP";
-            return "VECTOR_ARITH_INT";
-        }
-        return "VECTOR_OTHER";
-    }
-    return "SCALAR";
-}
 
 void inst_trace_init(void) {
     if (!INST_TRACE_ENABLED) return;
@@ -246,9 +186,6 @@ void inst_trace_emit_vector(thread_state_t * state, instr_data * instr,
     int vm = (insn_opcode >> 25) & 1;
     bool is_masked = (vm == 0);
 
-    bool vta = (vtype >> 6) & 1;
-    bool vma = (vtype >> 7) & 1;
-
     int lmul_factor = get_lmul_factor(lmul);
 
     bool is_widening = is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_ARITH_WIDENING);
@@ -258,9 +195,13 @@ void inst_trace_emit_vector(thread_state_t * state, instr_data * instr,
     if (dst_count > 8) dst_count = 8;
     if (dst_count < 1) dst_count = 1;
 
-    int src2_count = is_narrowing ? (lmul_factor * 2) : lmul_factor;
-    if (src2_count > 8) src2_count = 8;
-    if (src2_count < 1) src2_count = 1;
+    int src1_count = is_narrowing ? (lmul_factor * 2) : lmul_factor;
+    if (src1_count > 8) src1_count = 8;
+    if (src1_count < 1) src1_count = 1;
+
+    int src3_count = is_widening ? dst_count : lmul_factor;
+    if (src3_count > 8) src3_count = 8;
+    if (src3_count < 1) src3_count = 1;
 
     int dst_regs[MAX_REGS_IN_GROUP];
     int n_dst = 0;
@@ -272,15 +213,15 @@ void inst_trace_emit_vector(thread_state_t * state, instr_data * instr,
     int n_src = 0;
 
     int src1_group[MAX_REGS_IN_GROUP];
-    int n_src1 = collect_reg_group(instr->src1_d, lmul_factor, src1_group);
+    int n_src1 = collect_reg_group(instr->src1_d, src1_count, src1_group);
     for (int i = 0; i < n_src1 && n_src < 32; ++i) src_regs[n_src++] = src1_group[i];
 
     int src2_group[MAX_REGS_IN_GROUP];
-    int n_src2 = collect_reg_group(instr->src2_d, src2_count, src2_group);
+    int n_src2 = collect_reg_group(instr->src2_d, lmul_factor, src2_group);
     for (int i = 0; i < n_src2 && n_src < 32; ++i) src_regs[n_src++] = src2_group[i];
 
     int src3_group[MAX_REGS_IN_GROUP];
-    int n_src3 = collect_reg_group(instr->src3_d, lmul_factor, src3_group);
+    int n_src3 = collect_reg_group(instr->src3_d, src3_count, src3_group);
     for (int i = 0; i < n_src3 && n_src < 32; ++i) src_regs[n_src++] = src3_group[i];
 
     // If masked, register v0 is implicitly an input source
@@ -298,65 +239,17 @@ void inst_trace_emit_vector(thread_state_t * state, instr_data * instr,
     set_lock(write_lock);
     uint64_t seqno = ++inst_trace_seqno;
 
-    // Track dependencies per operand
-    inst_trace_dep_t deps[MAX_TRACE_DEPS];
-    int n_deps = 0;
-
-    // RAW dependencies on source registers
-    for (int i = 0; i < n_src && n_deps < MAX_TRACE_DEPS; ++i) {
-        int r = src_regs[i];
-        if (valid_reg(r) && state->inst_trace_last_write[r] != 0) {
-            reg_id_to_name(r, deps[n_deps].operand, sizeof(deps[n_deps].operand));
-            strcpy(deps[n_deps].dep_type, "RAW");
-            deps[n_deps].producer_seqno = state->inst_trace_last_write[r];
-            deps[n_deps].distance = (seqno >= deps[n_deps].producer_seqno) ? (seqno - deps[n_deps].producer_seqno) : 0;
-            n_deps++;
-        }
-    }
-
-    // WAW and WAR dependencies on destination registers
-    for (int i = 0; i < n_dst && n_deps < MAX_TRACE_DEPS; ++i) {
-        int r = dst_regs[i];
-        if (valid_reg(r)) {
-            if (state->inst_trace_last_write[r] != 0 && n_deps < MAX_TRACE_DEPS) {
-                reg_id_to_name(r, deps[n_deps].operand, sizeof(deps[n_deps].operand));
-                strcpy(deps[n_deps].dep_type, "WAW");
-                deps[n_deps].producer_seqno = state->inst_trace_last_write[r];
-                deps[n_deps].distance = (seqno >= deps[n_deps].producer_seqno) ? (seqno - deps[n_deps].producer_seqno) : 0;
-                n_deps++;
-            }
-            if (state->inst_trace_last_read[r] != 0 && n_deps < MAX_TRACE_DEPS) {
-                reg_id_to_name(r, deps[n_deps].operand, sizeof(deps[n_deps].operand));
-                strcpy(deps[n_deps].dep_type, "WAR");
-                deps[n_deps].producer_seqno = state->inst_trace_last_read[r];
-                deps[n_deps].distance = (seqno >= deps[n_deps].producer_seqno) ? (seqno - deps[n_deps].producer_seqno) : 0;
-                n_deps++;
-            }
-        }
-    }
-
-    // Update state register dependency tracking
-    for (int i = 0; i < n_src; ++i) {
-        int r = src_regs[i];
-        if (valid_reg(r)) state->inst_trace_last_read[r] = seqno;
-    }
-    for (int i = 0; i < n_dst; ++i) {
-        int r = dst_regs[i];
-        if (valid_reg(r)) state->inst_trace_last_write[r] = seqno;
-    }
-
     // 1. Write Main Instruction Record
     fprintf(FD_INST_TRACE, "{\"record_type\":\"inst\","
                            "\"seqno\":%" PRIu64 ","
                            "\"hart\":%d,"
                            "\"pc\":\"0x%" PRIx64 "\","
-                           "\"binary\":\"0x%08" PRIx32 "\","
                            "\"op\":",
-            seqno, state->cpu_index, instr->PC, insn_opcode);
+            seqno, state->cpu_index, instr->PC);
 
     // Extract opcode mnemonic
     char op_name[64];
-    size_t asm_len = strlen(instr->asm_string);
+    size_t asm_len = instr->asm_string ? strlen(instr->asm_string) : 0;
     size_t k = 0;
     while (k < asm_len && instr->asm_string[k] != ' ' && instr->asm_string[k] != '\t' && k < 63) {
         op_name[k] = instr->asm_string[k];
@@ -365,10 +258,7 @@ void inst_trace_emit_vector(thread_state_t * state, instr_data * instr,
     op_name[k] = '\0';
     write_json_escaped_string(FD_INST_TRACE, op_name);
 
-    fprintf(FD_INST_TRACE, ",\"asm\":");
-    write_json_escaped_string(FD_INST_TRACE, instr->asm_string);
-
-    fprintf(FD_INST_TRACE, ",\"decoded_op\":\"%s\",", decode_operation_name(instr));
+    fprintf(FD_INST_TRACE, ",\"decoded_op\":%u,", (unsigned int)instr->type_ext);
 
     // Destination register group
     fprintf(FD_INST_TRACE, "\"dst\":[");
@@ -382,25 +272,6 @@ void inst_trace_emit_vector(thread_state_t * state, instr_data * instr,
         char rname[16];
         reg_id_to_name(src_regs[i], rname, sizeof(rname));
         fprintf(FD_INST_TRACE, "%s\"%s\"", (i > 0 ? "," : ""), rname);
-    }
-    fprintf(FD_INST_TRACE, "],");
-
-    // Vector state fields
-    int sew_bits = 8 << sew;
-    const char * lmul_str = get_lmul_string(lmul);
-    fprintf(FD_INST_TRACE, "\"vl\":%" PRIu64 ","
-                           "\"sew\":%d,"
-                           "\"lmul\":\"%s\","
-                           "\"vta\":%d,"
-                           "\"vma\":%d,"
-                           "\"masked\":%s,"
-                           "\"deps\":[",
-            vl, sew_bits, lmul_str, vta ? 1 : 0, vma ? 1 : 0,
-            is_masked ? "true" : "false");
-
-    for (int i = 0; i < n_deps; ++i) {
-        fprintf(FD_INST_TRACE, "%s{\"operand\":\"%s\",\"dep_type\":\"%s\",\"producer_seqno\":%" PRIu64 ",\"distance\":%" PRIu64 "}",
-                (i > 0 ? "," : ""), deps[i].operand, deps[i].dep_type, deps[i].producer_seqno, deps[i].distance);
     }
     fprintf(FD_INST_TRACE, "]}\n");
 
@@ -535,44 +406,13 @@ void inst_trace_emit_vector(thread_state_t * state, instr_data * instr,
 void inst_trace_emit_vsetvl(thread_state_t * state, instr_data * instr,
                             uint64_t rvl, uint64_t vl, uint64_t vtype) {
     if (!INST_TRACE_ENABLED || FD_INST_TRACE == NULL) return;
+    (void)rvl;
 
     set_lock(write_lock);
     uint64_t seqno = ++inst_trace_seqno;
 
     int dst_reg = instr->dst_d;
     int src1_reg = instr->src1_d;
-
-    inst_trace_dep_t deps[MAX_TRACE_DEPS];
-    int n_deps = 0;
-
-    if (valid_reg(src1_reg) && state->inst_trace_last_write[src1_reg] != 0) {
-        reg_id_to_name(src1_reg, deps[n_deps].operand, sizeof(deps[n_deps].operand));
-        strcpy(deps[n_deps].dep_type, "RAW");
-        deps[n_deps].producer_seqno = state->inst_trace_last_write[src1_reg];
-        deps[n_deps].distance = (seqno >= deps[n_deps].producer_seqno) ? (seqno - deps[n_deps].producer_seqno) : 0;
-        n_deps++;
-    }
-
-    if (valid_reg(dst_reg)) {
-        if (state->inst_trace_last_write[dst_reg] != 0) {
-            reg_id_to_name(dst_reg, deps[n_deps].operand, sizeof(deps[n_deps].operand));
-            strcpy(deps[n_deps].dep_type, "WAW");
-            deps[n_deps].producer_seqno = state->inst_trace_last_write[dst_reg];
-            deps[n_deps].distance = (seqno >= deps[n_deps].producer_seqno) ? (seqno - deps[n_deps].producer_seqno) : 0;
-            n_deps++;
-        }
-        if (state->inst_trace_last_read[dst_reg] != 0) {
-            reg_id_to_name(dst_reg, deps[n_deps].operand, sizeof(deps[n_deps].operand));
-            strcpy(deps[n_deps].dep_type, "WAR");
-            deps[n_deps].producer_seqno = state->inst_trace_last_read[dst_reg];
-            deps[n_deps].distance = (seqno >= deps[n_deps].producer_seqno) ? (seqno - deps[n_deps].producer_seqno) : 0;
-            n_deps++;
-        }
-        state->inst_trace_last_write[dst_reg] = seqno;
-    }
-    if (valid_reg(src1_reg)) {
-        state->inst_trace_last_read[src1_reg] = seqno;
-    }
 
     int sew_bits = 8 << ((vtype >> 3) & 0x7);
     uint64_t lmul_code = vtype & 0x7;
@@ -584,34 +424,42 @@ void inst_trace_emit_vsetvl(thread_state_t * state, instr_data * instr,
     reg_id_to_name(dst_reg, dst_name, sizeof(dst_name));
     reg_id_to_name(src1_reg, src_name, sizeof(src_name));
 
+    // Extract opcode mnemonic
+    char op_name[64];
+    size_t asm_len = instr->asm_string ? strlen(instr->asm_string) : 0;
+    size_t k = 0;
+    while (k < asm_len && instr->asm_string[k] != ' ' && instr->asm_string[k] != '\t' && k < 63) {
+        op_name[k] = instr->asm_string[k];
+        k++;
+    }
+    op_name[k] = '\0';
+    if (k == 0) strcpy(op_name, "vsetvl");
+
     fprintf(FD_INST_TRACE, "{\"record_type\":\"inst\","
                            "\"seqno\":%" PRIu64 ","
                            "\"hart\":%d,"
                            "\"pc\":\"0x%" PRIx64 "\","
-                           "\"binary\":\"0x%08" PRIx32 "\","
-                           "\"op\":\"vsetvl\","
-                           "\"asm\":",
-            seqno, state->cpu_index, instr->PC, instr->instr32);
-    write_json_escaped_string(FD_INST_TRACE, instr->asm_string);
-    fprintf(FD_INST_TRACE, ",\"decoded_op\":\"VSETVL\","
-                           "\"dst\":[\"%s\"],"
-                           "\"srcs\":[\"%s\"],"
-                           "\"rvl\":%" PRIu64 ","
-                           "\"vl\":%" PRIu64 ","
+                           "\"op\":",
+            seqno, state->cpu_index, instr->PC);
+    write_json_escaped_string(FD_INST_TRACE, op_name);
+
+    fprintf(FD_INST_TRACE, ",\"decoded_op\":%u,"
+                           "\"dst\":[",
+            (unsigned int)instr->type_ext);
+    if (valid_reg(dst_reg)) {
+        fprintf(FD_INST_TRACE, "\"%s\"", dst_name);
+    }
+    fprintf(FD_INST_TRACE, "],\"srcs\":[");
+    if (valid_reg(src1_reg)) {
+        fprintf(FD_INST_TRACE, "\"%s\"", src_name);
+    }
+    fprintf(FD_INST_TRACE, "],\"vl\":%" PRIu64 ","
                            "\"sew\":%d,"
                            "\"lmul\":\"%s\","
                            "\"vta\":%d,"
-                           "\"vma\":%d,"
-                           "\"masked\":false,"
-                           "\"deps\":[",
-            dst_name, src_name, rvl, vl, sew_bits, get_lmul_string(lmul_code),
+                           "\"vma\":%d}\n",
+            vl, sew_bits, get_lmul_string(lmul_code),
             vta ? 1 : 0, vma ? 1 : 0);
-
-    for (int i = 0; i < n_deps; ++i) {
-        fprintf(FD_INST_TRACE, "%s{\"operand\":\"%s\",\"dep_type\":\"%s\",\"producer_seqno\":%" PRIu64 ",\"distance\":%" PRIu64 "}",
-                (i > 0 ? "," : ""), deps[i].operand, deps[i].dep_type, deps[i].producer_seqno, deps[i].distance);
-    }
-    fprintf(FD_INST_TRACE, "]}\n");
 
     release_lock(write_lock);
 }
@@ -620,47 +468,10 @@ void inst_trace_emit_scalar(thread_state_t * state, uint64_t pc,
                             const char * asm_str, uint32_t insn_opcode,
                             int dst, int src1, int src2) {
     if (!INST_TRACE_ENABLED || !TRACE_SCALAR || FD_INST_TRACE == NULL) return;
+    (void)insn_opcode;
 
     set_lock(write_lock);
     uint64_t seqno = ++inst_trace_seqno;
-
-    inst_trace_dep_t deps[MAX_TRACE_DEPS];
-    int n_deps = 0;
-
-    if (valid_reg(src1) && state->inst_trace_last_write[src1] != 0) {
-        reg_id_to_name(src1, deps[n_deps].operand, sizeof(deps[n_deps].operand));
-        strcpy(deps[n_deps].dep_type, "RAW");
-        deps[n_deps].producer_seqno = state->inst_trace_last_write[src1];
-        deps[n_deps].distance = (seqno >= deps[n_deps].producer_seqno) ? (seqno - deps[n_deps].producer_seqno) : 0;
-        n_deps++;
-    }
-    if (valid_reg(src2) && state->inst_trace_last_write[src2] != 0) {
-        reg_id_to_name(src2, deps[n_deps].operand, sizeof(deps[n_deps].operand));
-        strcpy(deps[n_deps].dep_type, "RAW");
-        deps[n_deps].producer_seqno = state->inst_trace_last_write[src2];
-        deps[n_deps].distance = (seqno >= deps[n_deps].producer_seqno) ? (seqno - deps[n_deps].producer_seqno) : 0;
-        n_deps++;
-    }
-
-    if (valid_reg(dst)) {
-        if (state->inst_trace_last_write[dst] != 0) {
-            reg_id_to_name(dst, deps[n_deps].operand, sizeof(deps[n_deps].operand));
-            strcpy(deps[n_deps].dep_type, "WAW");
-            deps[n_deps].producer_seqno = state->inst_trace_last_write[dst];
-            deps[n_deps].distance = (seqno >= deps[n_deps].producer_seqno) ? (seqno - deps[n_deps].producer_seqno) : 0;
-            n_deps++;
-        }
-        if (state->inst_trace_last_read[dst] != 0) {
-            reg_id_to_name(dst, deps[n_deps].operand, sizeof(deps[n_deps].operand));
-            strcpy(deps[n_deps].dep_type, "WAR");
-            deps[n_deps].producer_seqno = state->inst_trace_last_read[dst];
-            deps[n_deps].distance = (seqno >= deps[n_deps].producer_seqno) ? (seqno - deps[n_deps].producer_seqno) : 0;
-            n_deps++;
-        }
-        state->inst_trace_last_write[dst] = seqno;
-    }
-    if (valid_reg(src1)) state->inst_trace_last_read[src1] = seqno;
-    if (valid_reg(src2)) state->inst_trace_last_read[src2] = seqno;
 
     char dst_name[16];
     char src1_name[16];
@@ -673,9 +484,8 @@ void inst_trace_emit_scalar(thread_state_t * state, uint64_t pc,
                            "\"seqno\":%" PRIu64 ","
                            "\"hart\":%d,"
                            "\"pc\":\"0x%" PRIx64 "\","
-                           "\"binary\":\"0x%08" PRIx32 "\","
                            "\"op\":",
-            seqno, state->cpu_index, pc, insn_opcode);
+            seqno, state->cpu_index, pc);
 
     char op_name[64];
     size_t asm_len = asm_str ? strlen(asm_str) : 0;
@@ -687,10 +497,7 @@ void inst_trace_emit_scalar(thread_state_t * state, uint64_t pc,
     op_name[k] = '\0';
     write_json_escaped_string(FD_INST_TRACE, op_name);
 
-    fprintf(FD_INST_TRACE, ",\"asm\":");
-    write_json_escaped_string(FD_INST_TRACE, asm_str ? asm_str : "");
-
-    fprintf(FD_INST_TRACE, ",\"decoded_op\":\"SCALAR\","
+    fprintf(FD_INST_TRACE, ",\"decoded_op\":0,"
                            "\"dst\":[%s%s%s],"
                            "\"srcs\":[",
             valid_reg(dst) ? "\"" : "", valid_reg(dst) ? dst_name : "", valid_reg(dst) ? "\"" : "");
@@ -704,13 +511,6 @@ void inst_trace_emit_scalar(thread_state_t * state, uint64_t pc,
         fprintf(FD_INST_TRACE, "%s\"%s\"", n_s > 0 ? "," : "", src2_name);
     }
 
-    fprintf(FD_INST_TRACE, "],\"vl\":0,\"sew\":0,\"lmul\":\"m1\",\"vta\":0,\"vma\":0,"
-                           "\"masked\":false,\"deps\":[");
-
-    for (int i = 0; i < n_deps; ++i) {
-        fprintf(FD_INST_TRACE, "%s{\"operand\":\"%s\",\"dep_type\":\"%s\",\"producer_seqno\":%" PRIu64 ",\"distance\":%" PRIu64 "}",
-                (i > 0 ? "," : ""), deps[i].operand, deps[i].dep_type, deps[i].producer_seqno, deps[i].distance);
-    }
     fprintf(FD_INST_TRACE, "]}\n");
 
     release_lock(write_lock);

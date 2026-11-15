@@ -41,6 +41,7 @@ char TRACE_BB = 0;
 char * BB_JSON_NAME = NULL;
 char TRACE_EXTENDED = 0;
 char INST_TRACE_ENABLED = 0;
+char INST_TRACE_BB_MODE = 0;
 char * INST_TRACE_NAME = NULL;
 FILE * FD_INST_TRACE = NULL;
 char DEBUG_INFO = 0;
@@ -144,8 +145,6 @@ void reset_thread(int cpu_index){
 	reset_counters(&(state->accum_counters));
 	memset(state->write_reg_deps, 0, sizeof(state->write_reg_deps));
 	memset(state->read_reg_deps, 0, sizeof(state->read_reg_deps));
-	memset(state->inst_trace_last_write, 0, sizeof(state->inst_trace_last_write));
-	memset(state->inst_trace_last_read, 0, sizeof(state->inst_trace_last_read));
 	memset(state->rvv_raw_win, 0, sizeof(state->rvv_raw_win));
 	state->rvv_raw_win_idx = 0;
 	state->rvv_raw_win_len = 0;
