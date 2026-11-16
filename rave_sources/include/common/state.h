@@ -109,10 +109,8 @@ struct thread_state_t{
 
     // Circular buffer for windowed RAW dependency tracking (W <= 16)
     struct {
-        short dst_d;
-        short src1_d;
-        short src2_d;
-        short src3_d;
+        uint32_t dst_mask;
+        uint32_t src_mask;
     } rvv_raw_win[16];
     int rvv_raw_win_idx;
     int rvv_raw_win_len;

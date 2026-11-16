@@ -199,12 +199,19 @@ void inst_trace_emit_vector(thread_state_t * state, instr_data * instr,
     if (src1_count > 8) src1_count = 8;
     if (src1_count < 1) src1_count = 1;
 
+    int src2_count = lmul_factor;
+
     int src3_count = is_widening ? dst_count : lmul_factor;
     if (src3_count > 8) src3_count = 8;
     if (src3_count < 1) src3_count = 1;
 
     if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_MASK)) {
         dst_count = 1;
+    }
+
+    if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_REDUCTION)) {
+        dst_count  = 1;
+        src2_count = 1;
     }
 
     if (is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_WHOLE_REGISTER)) {
@@ -236,7 +243,7 @@ void inst_trace_emit_vector(thread_state_t * state, instr_data * instr,
     for (int i = 0; i < n_src1 && n_src < 32; ++i) src_regs[n_src++] = src1_group[i];
 
     int src2_group[MAX_REGS_IN_GROUP];
-    int n_src2 = collect_reg_group(instr->src2_d, lmul_factor, src2_group);
+    int n_src2 = collect_reg_group(instr->src2_d, src2_count, src2_group);
     for (int i = 0; i < n_src2 && n_src < 32; ++i) src_regs[n_src++] = src2_group[i];
 
     int src3_group[MAX_REGS_IN_GROUP];

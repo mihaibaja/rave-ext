@@ -177,20 +177,10 @@ static inline uint16_t get_cons_idx(uint16_t type) {
     return INVALID_RAW_IDX;
 }
 
-static int rvv_mis_search(uint16_t mask, const uint16_t *conflict) {
-    if (mask == 0) return 0;
-    int v = __builtin_ctz(mask);
-    int without_v = rvv_mis_search(mask & ~(1U << v), conflict);
-    int with_v = 1 + rvv_mis_search(mask & ~conflict[v] & ~(1U << v), conflict);
-    return (with_v > without_v) ? with_v : without_v;
-}
-
-static void track_vector_parallelism_available(thread_state_t *state, short dst_d, short src1_d, short src2_d, short src3_d) {
+static void track_vector_parallelism_available(thread_state_t *state, uint32_t dst_mask, uint32_t src_mask) {
     int cur = state->rvv_raw_win_idx;
-    state->rvv_raw_win[cur].dst_d  = dst_d;
-    state->rvv_raw_win[cur].src1_d = src1_d;
-    state->rvv_raw_win[cur].src2_d = src2_d;
-    state->rvv_raw_win[cur].src3_d = src3_d;
+    state->rvv_raw_win[cur].dst_mask = dst_mask;
+    state->rvv_raw_win[cur].src_mask = src_mask;
     state->rvv_raw_win_idx = (cur + 1) % 16;
     if (state->rvv_raw_win_len < 16) {
         state->rvv_raw_win_len++;
@@ -199,49 +189,24 @@ static void track_vector_parallelism_available(thread_state_t *state, short dst_
     static const int win_sizes[4] = {2, 4, 8, 16};
     for (int w_idx = 0; w_idx < 4; w_idx++) {
         int W = win_sizes[w_idx];
-        if (state->rvv_raw_win_len < W) continue;
+        if (state->rvv_raw_win_len < W) continue; // Si no hay suficientes instrucciones en la ventana, no se puede calcular -> se omite.
 
-        uint16_t dep[16] = {0};
-        for (int i = 0; i < W; i++) {
-            int slot_i = (cur - (W - 1 - i) + 32) % 16;
-            short d = state->rvv_raw_win[slot_i].dst_d;
-            if (valid_reg_id(d) && d >= RAVE_INI_REG_V) {
-                for (int j = i + 1; j < W; j++) {
-                    int slot_j = (cur - (W - 1 - j) + 32) % 16;
-                    short s1 = state->rvv_raw_win[slot_j].src1_d;
-                    short s2 = state->rvv_raw_win[slot_j].src2_d;
-                    short s3 = state->rvv_raw_win[slot_j].src3_d;
-                    if (s1 == d || s2 == d || s3 == d) {
-                        dep[i] |= (1U << j);
-                    }
-                }
+        // Calcular la paralelización disponible en la ventana, suponiendo ejecución FIFO.
+        uint32_t dirty_mask = 0;
+        uint8_t ready_insns = 0;
+        for(int i = 0; i < W; i++){
+            int slot_i = (cur - (W - 1 - i) + 16) % 16;
+            uint32_t d_mask = state->rvv_raw_win[slot_i].dst_mask;
+            uint32_t s_mask = state->rvv_raw_win[slot_i].src_mask;
+
+            if((s_mask & dirty_mask) == 0){
+                ready_insns++;
             }
+            
+            dirty_mask |= d_mask;
         }
 
-        // Transitive closure (Warshall)
-        for (int k = 0; k < W; k++) {
-            for (int i = 0; i < W; i++) {
-                if (dep[i] & (1U << k)) {
-                    dep[i] |= dep[k];
-                }
-            }
-        }
-
-        // Undirected conflict mask
-        uint16_t conflict[16] = {0};
-        for (int i = 0; i < W; i++) {
-            conflict[i] = dep[i];
-            for (int j = 0; j < W; j++) {
-                if (dep[j] & (1U << i)) {
-                    conflict[i] |= (1U << j);
-                }
-            }
-        }
-
-        uint16_t all_mask = (W == 16) ? 0xFFFF : ((1U << W) - 1);
-        int mis = rvv_mis_search(all_mask, conflict);
-
-        state->accum_counters.par_avail_sum[w_idx] += (double)mis;
+        state->accum_counters.par_avail_sum[w_idx] += (double)ready_insns;
         state->accum_counters.par_avail_count[w_idx] += 1.0;
     }
 }
@@ -578,10 +543,16 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 
         uint8_t dst_factor  = is_widening  ? (min_lmul * 2 > 8 ? 8 : min_lmul * 2) : min_lmul;
         uint8_t src1_factor = is_narrowing ? (min_lmul * 2 > 8 ? 8 : min_lmul * 2) : min_lmul;
+        uint8_t src2_factor = min_lmul;
         uint8_t src3_factor = is_widening  ? dst_factor : min_lmul;
 
         if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_MASK)) {
             dst_factor = 1;
+        }
+
+        if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_REDUCTION)) {
+            dst_factor  = 1;
+            src2_factor = 1;
         }
 
         if (is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_WHOLE_REGISTER)) {
@@ -601,7 +572,7 @@ void insn_exec(thread_state_t * state, instr_data * instr){
 
         uint8_t count_dst  = (instr->dst_d  >= RAVE_INI_REG_V) ? dst_factor  : 1;                                                                                                                      
         uint8_t count_src1 = (instr->src1_d >= RAVE_INI_REG_V) ? src1_factor : 1;  
-        uint8_t count_src2 = (instr->src2_d >= RAVE_INI_REG_V) ? min_lmul    : 1;  
+        uint8_t count_src2 = (instr->src2_d >= RAVE_INI_REG_V) ? src2_factor : 1;  
         uint8_t count_src3 = (instr->src3_d >= RAVE_INI_REG_V) ? src3_factor : 1;  
 
         // To keep track of the Just-Before-Matrix instructions (10x10)
@@ -724,7 +695,38 @@ void insn_exec(thread_state_t * state, instr_data * instr){
         for(int i = 0; i < count_src3; i++) if(valid_reg_id(instr->src3_d + i)) state->read_reg_deps[instr->src3_d  + i] = instr_c;
         if (is_masked) state->read_reg_deps[RAVE_INI_REG_V + 0] = instr_c;
 
-        track_vector_parallelism_available(state, instr->dst_d, instr->src1_d, instr->src2_d, instr->src3_d);
+        uint32_t dst_mask = 0;
+        if (is_vector_reg(instr->dst_d)) {
+            int v_dst = instr->dst_d - RAVE_INI_REG_V;
+            for (int k = 0; k < count_dst && (v_dst + k) < NUM_VECTOR_REGS; ++k) {
+                dst_mask |= (1U << (v_dst + k));
+            }
+        }
+
+        uint32_t src_mask = 0;
+        if (is_vector_reg(instr->src1_d)) {
+            int v_src1 = instr->src1_d - RAVE_INI_REG_V;
+            for (int k = 0; k < count_src1 && (v_src1 + k) < NUM_VECTOR_REGS; ++k) {
+                src_mask |= (1U << (v_src1 + k));
+            }
+        }
+        if (is_vector_reg(instr->src2_d)) {
+            int v_src2 = instr->src2_d - RAVE_INI_REG_V;
+            for (int k = 0; k < count_src2 && (v_src2 + k) < NUM_VECTOR_REGS; ++k) {
+                src_mask |= (1U << (v_src2 + k));
+            }
+        }
+        if (is_vector_reg(instr->src3_d)) {
+            int v_src3 = instr->src3_d - RAVE_INI_REG_V;
+            for (int k = 0; k < count_src3 && (v_src3 + k) < NUM_VECTOR_REGS; ++k) {
+                src_mask |= (1U << (v_src3 + k));
+            }
+        }
+        if (is_masked) {
+            src_mask |= (1U << 0);
+        }
+
+        track_vector_parallelism_available(state, dst_mask, src_mask);
     }
 
 	if (is_type(instr->type, T_VECTOR)){ //VECTOR
