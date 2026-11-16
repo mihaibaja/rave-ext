@@ -24,6 +24,9 @@ Criterios y reglas de cálculo de dependencias de datos (RAW, WAR, WAW) para ins
 - **Widening ($2\times\text{SEW}$):** El operando destino `dst` ocupa $2 \times \text{LMUL}$ registros (máximo 8).
 - **Narrowing ($\text{SEW}/2$):** El vector de entrada ancho (`src1`) ocupa $2 \times \text{LMUL}$ registros (máximo 8).
 - **Widening Fused MAC (`vwmacc*`, `vfwmacc*`):** El acumulador `src3` (que coincide con `dst`) ocupa $2 \times \text{LMUL}$ registros (máximo 8).
+- **Operaciones de Máscara (`TYPE_EXT_ARITH_MASK` - `vmseq`, `vmsne`, etc.):** El operando destino `dst` escribe un vector de máscara (1 bit por elemento), por lo que siempre ocupa **1 solo registro** (`count = 1`), independientemente de $\text{LMUL}$.
+- **Whole Register Move (`TYPE_EXT_WHOLE_REGISTER` - `vmv1r`, `vmv2r`, `vmv4r`, `vmv8r`):** Ignoran el $\text{LMUL}$ de `vsetvl`. Mueven $N \in \{1, 2, 4, 8\}$ registros contiguos tanto en lectura (`src1`) como en escritura (`dst`).
+- **Whole Register Load/Store (`TYPE_EXT_MEMORY_WHOLE_REGISTER` - `vl<N>re*`, `vs<N>r`):** Ignoran el $\text{LMUL}$ de `vsetvl`. Transfieren $N \in \{1, 2, 4, 8\}$ registros contiguos entre memoria y registros vectoriales (`dst` para load, `src3` para store).
 
 ---
 

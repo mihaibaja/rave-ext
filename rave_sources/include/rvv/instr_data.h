@@ -63,8 +63,9 @@
 #define TYPE_EXT_ARITH_NORMAL        0x0000     // 00
 #define TYPE_EXT_ARITH_WIDENING      0x0004     // 01 (0x0004)
 #define TYPE_EXT_ARITH_NARROWING     0x0008     // 10 (0x0008)
-#define TYPE_EXT_MEMORY_NORMAL       0x0004     // 00
+#define TYPE_EXT_MEMORY_NORMAL       0x0000     // 00
 #define TYPE_EXT_MEMORY_SEGMENTED    0x0004     // 01
+#define TYPE_EXT_MEMORY_WHOLE_REGISTER 0x0008   // 10 (0x0008)
 
 // Arith Operation (bits 6:4) && Ordered/Unordered for memory ops( -TODO podemos ponerlo como un único bit) 
 #define TYPE_EXT_ARITH_COMPUTATION   0x0000     // 000 (Default ALU)

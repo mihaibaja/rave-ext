@@ -203,6 +203,25 @@ void inst_trace_emit_vector(thread_state_t * state, instr_data * instr,
     if (src3_count > 8) src3_count = 8;
     if (src3_count < 1) src3_count = 1;
 
+    if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_MASK)) {
+        dst_count = 1;
+    }
+
+    if (is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_WHOLE_REGISTER)) {
+        int whole_count = ((insn_opcode >> 15) & 0x7) + 1;
+        dst_count  = whole_count;
+        src1_count = whole_count;
+    }
+
+    if (is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_MEMORY_WHOLE_REGISTER)) {
+        int whole_count = ((insn_opcode >> 29) & 0x7) + 1;
+        if (is_type_ext(instr->type_ext, MASK_EXT_BASE, TYPE_EXT_LOAD)) {
+            dst_count = whole_count;
+        } else if (is_type_ext(instr->type_ext, MASK_EXT_BASE, TYPE_EXT_STORE)) {
+            src3_count = whole_count;
+        }
+    }
+
     int dst_regs[MAX_REGS_IN_GROUP];
     int n_dst = 0;
     if (valid_reg(instr->dst_d)) {

@@ -236,7 +236,7 @@ uint16_t instr_set_vector_type_ext(uint32_t insn_opcode, char* instr_asm, uint16
                     type_ext |= TYPE_EXT_WRITE_SCALAR;
                     type_ext |= (funct3==1)?TYPE_EXT_FP:TYPE_EXT_INT;
 
-                } else if ((funct3 == 2 || funct3 == 1) && (vs1 == 16 || vs1 == 17)) {  // vcpop.m y vfirst.m
+                } else if ((funct3 == 2) && (vs1 == 16 || vs1 == 17)) {  // vcpop.m y vfirst.m
                     type_ext     &= ~MASK_EXT_SUBSUBTYPE;   
                     type_ext |= TYPE_EXT_ARITH_MASK;
                     type_ext |= TYPE_EXT_WRITE_SCALAR;
@@ -257,10 +257,27 @@ uint16_t instr_set_vector_type_ext(uint32_t insn_opcode, char* instr_asm, uint16
             } else if(funct6 == 0x17 && vm == 1) {                    // vmv.v.v, vmv.v.x, vfmv.v.f
                 type_ext     &= ~MASK_EXT_SUBSUBTYPE;
                 type_ext     |= TYPE_EXT_ARITH_MOVE;
-                if (funct3 == 1 || funct3 == 5) {
-                    type_ext |= TYPE_EXT_FP;                          // vfmv.v.f
-                } else {
-                    type_ext |= TYPE_EXT_INT;                         // vmv.v.v, vmv.v.x, vmv.v.i
+                type_ext |= (funct3 == 1 || funct3 == 5) ? TYPE_EXT_FP : TYPE_EXT_INT;
+            }
+
+            if(funct3 >= 0 && funct3 < 6 && funct3 != 2){
+                if (funct6 >= 0x18 && funct6 <= 0x1F){ // mask gen (vmseq, vmsne, vmfeq...)
+                    type_ext &= ~MASK_EXT_SUBSUBTYPE;
+                    type_ext |= TYPE_EXT_ARITH_MASK;
+                    type_ext |= (funct3 == 1 || funct3 == 5) ? TYPE_EXT_FP : TYPE_EXT_INT;
+                }
+            }else if(funct3 == 2){
+                if (funct6 == 0x14){ 
+                    vs1 = get_bit_field(insn_opcode,19,15);
+                    if ((vs1 >= 0x01 && vs1 <= 0x03) || vs1 == 0x10){
+                        type_ext &= ~MASK_EXT_SUBSUBTYPE;
+                        type_ext |= TYPE_EXT_ARITH_MASK;
+                        type_ext |= TYPE_EXT_INT;
+                    }
+                }else if (funct6 >= 0x18 && funct6 <= 0x1F){ 
+                    type_ext &= ~MASK_EXT_SUBSUBTYPE;
+                    type_ext |= TYPE_EXT_ARITH_MASK;
+                    type_ext |= TYPE_EXT_INT;
                 }
             }
 
@@ -338,11 +355,13 @@ uint16_t instr_set_vector_type_ext(uint32_t insn_opcode, char* instr_asm, uint16
         case MAJOR_LOAD:
             type_ext |= TYPE_EXT_LOAD;
 			nf = (insn_opcode >> 29) & 0x7;
-            if(nf > 0) {
+            mop = get_bit_field(insn_opcode,28,26);
+            if(mop == 0 && get_bit_field(insn_opcode,24,20) == 8) {
+                type_ext |= TYPE_EXT_MEMORY_WHOLE_REGISTER;
+            } else if(nf > 0) {
                 type_ext |= TYPE_EXT_MEMORY_SEGMENTED;
             }
             if(is_subsubtype(cur_type, T_INDEX)){
-                mop = get_bit_field(insn_opcode,28,26);
                 if(mop == 3) type_ext |= TYPE_EXT_MEMORY_ORDERED;
                 else       type_ext |= TYPE_EXT_MEMORY_UNORDERED; // I know that as its 000 we dont need to do this but to be more explicit I prefer to.
             }
@@ -357,11 +376,13 @@ uint16_t instr_set_vector_type_ext(uint32_t insn_opcode, char* instr_asm, uint16
         case MAJOR_STORE:
             type_ext |= TYPE_EXT_STORE;	
 			nf = (insn_opcode >> 29) & 0x7;
-            if(nf > 0) {
+            mop = get_bit_field(insn_opcode,28,26);
+            if(mop == 0 && get_bit_field(insn_opcode,24,20) == 8) {
+                type_ext |= TYPE_EXT_MEMORY_WHOLE_REGISTER;
+            } else if(nf > 0) {
                 type_ext |= TYPE_EXT_MEMORY_SEGMENTED;
             }	
             if(is_subsubtype(cur_type, T_INDEX)){
-                mop = get_bit_field(insn_opcode,28,26);
                 if(mop == 3) type_ext |= TYPE_EXT_MEMORY_ORDERED;
                 else       type_ext |= TYPE_EXT_MEMORY_UNORDERED; // I know that as its 000 we dont need to do this but to be more explicit I prefer to.
                 

@@ -580,6 +580,25 @@ void insn_exec(thread_state_t * state, instr_data * instr){
         uint8_t src1_factor = is_narrowing ? (min_lmul * 2 > 8 ? 8 : min_lmul * 2) : min_lmul;
         uint8_t src3_factor = is_widening  ? dst_factor : min_lmul;
 
+        if (is_type_ext(instr->type_ext, MASK_EXT_SUBSUBTYPE, TYPE_EXT_ARITH_MASK)) {
+            dst_factor = 1;
+        }
+
+        if (is_type_ext(instr->type_ext, MASK_EXT_OPERAND, TYPE_EXT_WHOLE_REGISTER)) {
+            uint8_t whole_count = ((instr->instr32 >> 15) & 0x7) + 1;
+            dst_factor  = whole_count;
+            src1_factor = whole_count;
+        }
+
+        if (is_type_ext(instr->type_ext, MASK_EXT_SUBTYPE, TYPE_EXT_MEMORY_WHOLE_REGISTER)) {
+            uint8_t whole_count = ((instr->instr32 >> 29) & 0x7) + 1;
+            if (is_type_ext(instr->type_ext, MASK_EXT_BASE, TYPE_EXT_LOAD)) {
+                dst_factor = whole_count;
+            } else if (is_type_ext(instr->type_ext, MASK_EXT_BASE, TYPE_EXT_STORE)) {
+                src3_factor = whole_count;
+            }
+        }
+
         uint8_t count_dst  = (instr->dst_d  >= RAVE_INI_REG_V) ? dst_factor  : 1;                                                                                                                      
         uint8_t count_src1 = (instr->src1_d >= RAVE_INI_REG_V) ? src1_factor : 1;  
         uint8_t count_src2 = (instr->src2_d >= RAVE_INI_REG_V) ? min_lmul    : 1;  
