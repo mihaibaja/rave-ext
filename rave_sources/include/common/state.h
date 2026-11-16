@@ -104,8 +104,8 @@ struct thread_state_t{
 	int prev_dst;
 
     // To check dependencies
-    struct inst_compressed_t* write_reg_deps[96];
-    struct inst_compressed_t* read_reg_deps[96];
+    struct inst_compressed_t write_reg_deps[96];
+    struct inst_compressed_t read_reg_deps[96];
 
     // Circular buffer for windowed RAW dependency tracking (W <= 16)
     struct {
